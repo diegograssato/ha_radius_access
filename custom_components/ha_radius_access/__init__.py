@@ -15,6 +15,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNAME
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import config_validation as cv
 
 from .const import (
     CONF_DATABASE,
@@ -42,6 +43,8 @@ DATA_PANEL_REGISTERED = "panel_registered"
 DATA_SERVICES_REGISTERED = "services_registered"
 
 SERVICE_DISCONNECT_USER_SCHEMA = vol.Schema({vol.Required("username"): str})
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:

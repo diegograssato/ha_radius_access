@@ -11,6 +11,7 @@
     "@diegograssato"
   ],
   "config_flow": true,
+  "dependencies": ["http"],
   "integration_type": "hub",
   "iot_class": "local_polling",
   "loggers": [
