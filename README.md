@@ -1,4 +1,4 @@
-# FreeRADIUS Manager (Home Assistant Custom Component)
+# HA Radius Access (Home Assistant Custom Component)
 
 Painel administrativo para Home Assistant com backend em Python para gerenciar MySQL do FreeRADIUS.
 
