@@ -1,0 +1,15 @@
+sync_users:
+  name: Sync users
+  description: Runs a consistency check between fr_entity_type and radcheck, then refreshes coordinator cache.
+
+disconnect_user:
+  name: Disconnect user
+  description: Force-closes active sessions in radacct for a username by setting acctstoptime.
+  fields:
+    username:
+      name: Username
+      description: Username or MAC to disconnect.
+      required: true
+      example: "user01"
+      selector:
+        text:
