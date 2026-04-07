@@ -1,20 +1,20 @@
 {
   "domain": "ha_radius_access",
   "name": "HA Radius Access",
-  "version": "0.1.0",
-  "documentation": "https://github.com/diegograssato/ha_radius_access",
-  "issue_tracker": "https://github.com/diegograssato/ha_radius_access/issues",
-  "requirements": [
-    "aiomysql==0.2.0"
-  ],
   "codeowners": [
     "@diegograssato"
   ],
   "config_flow": true,
   "dependencies": ["http"],
+  "documentation": "https://github.com/diegograssato/ha_radius_access",
   "integration_type": "hub",
   "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/diegograssato/ha_radius_access/issues",
   "loggers": [
     "custom_components.ha_radius_access"
-  ]
+  ],
+  "requirements": [
+    "aiomysql==0.2.0"
+  ],
+  "version": "0.1.0"
 }
