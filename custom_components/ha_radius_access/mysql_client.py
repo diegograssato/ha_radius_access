@@ -92,6 +92,24 @@ class FreeRadiusMySQLClient:
                 f"'{self._config.database}'."
             )
 
+        # Backward compatible migration for integrations already running in production.
+        await self._ensure_entity_type_description_column()
+
+    async def _ensure_entity_type_description_column(self) -> None:
+        """Ensure fr_entity_type has an optional description column."""
+        row = await self.fetch_one(
+            "SELECT COUNT(*) AS total FROM information_schema.columns "
+            "WHERE table_schema=%s AND table_name=%s AND column_name='description'",
+            (self._config.database, TABLE_ENTITY_TYPE),
+        )
+        if row and int(row["total"]) > 0:
+            return
+
+        await self.execute(
+            "ALTER TABLE fr_entity_type "
+            "ADD COLUMN description VARCHAR(255) NULL DEFAULT NULL AFTER entity_type"
+        )
+
     async def fetch_all(self, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         """Run SELECT query and return all rows as dicts."""
         if self._pool is None:
@@ -295,7 +313,7 @@ class FreeRadiusMySQLClient:
         if entity_type and entity_type not in ENTITY_TYPES:
             raise FreeRadiusDBError("Invalid entity_type")
 
-        allowed_sort = {"username", "groupname", "groupnames", "entity_type", "enable"}
+        allowed_sort = {"username", "groupname", "groupnames", "entity_type", "enable", "description"}
         if sort_by not in allowed_sort:
             sort_by = "username"
         if sort_by == "groupname":
@@ -320,8 +338,9 @@ class FreeRadiusMySQLClient:
             params.append(groupname)
 
         if search:
-            where_parts.append("u.username LIKE %s")
-            params.append(f"%{search}%")
+            where_parts.append("(u.username LIKE %s OR COALESCE(et.description, '') LIKE %s)")
+            search_like = f"%{search}%"
+            params.extend([search_like, search_like])
 
         where_clause = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
 
@@ -336,7 +355,7 @@ class FreeRadiusMySQLClient:
 
         offset = max(0, (page - 1) * page_size)
         sql = (
-            "SELECT u.username, et.entity_type, "
+            "SELECT u.username, et.entity_type, COALESCE(et.description, '') AS description, "
             "COALESCE(MAX(CASE "
             "WHEN UPPER(u.enable)=%s THEN %s "
             "WHEN UPPER(u.enable)=%s THEN %s "
@@ -346,7 +365,7 @@ class FreeRadiusMySQLClient:
             "JOIN fr_entity_type et ON et.username=u.username "
             "LEFT JOIN radusergroup g ON g.username=u.username "
             f"{where_clause} "
-            "GROUP BY u.username, et.entity_type "
+            "GROUP BY u.username, et.entity_type, et.description "
             f"ORDER BY {sort_by} {sort_order.upper()} "
             "LIMIT %s OFFSET %s"
         )
@@ -368,12 +387,13 @@ class FreeRadiusMySQLClient:
             "total": total,
         }
 
-    async def _set_entity_type(self, username: str, entity_type: str) -> None:
+    async def _set_entity_type(self, username: str, entity_type: str, description: str | None = None) -> None:
         sql = (
-            "INSERT INTO fr_entity_type (username, entity_type) VALUES (%s, %s) "
-            "ON DUPLICATE KEY UPDATE entity_type=VALUES(entity_type)"
+            "INSERT INTO fr_entity_type (username, entity_type, description) VALUES (%s, %s, %s) "
+            "ON DUPLICATE KEY UPDATE "
+            "entity_type=VALUES(entity_type), description=VALUES(description)"
         )
-        await self.execute(sql, (username, entity_type))
+        await self.execute(sql, (username, entity_type, description))
 
     async def _replace_radreply(self, username: str, attributes: list[dict[str, str]]) -> None:
         statements: list[tuple[str, tuple[Any, ...]]] = [
@@ -407,6 +427,7 @@ class FreeRadiusMySQLClient:
         password: str | None,
         enable: str,
         entity_type: str,
+        description: str | None,
         groups: list[str],
         reply_attributes: list[dict[str, str]],
     ) -> None:
@@ -466,13 +487,14 @@ class FreeRadiusMySQLClient:
             )
 
         await self.transaction(statements)
-        await self._set_entity_type(username, entity_type)
+        await self._set_entity_type(username, entity_type, description)
 
     async def update_user(
         self,
         username: str,
         password: str | None,
         enable: str,
+        description: str | None,
         groups: list[str],
         reply_attributes: list[dict[str, str]],
     ) -> None:
@@ -489,6 +511,7 @@ class FreeRadiusMySQLClient:
             ("DELETE FROM radreply WHERE username=%s", (username,)),
             ("DELETE FROM radusergroup WHERE username=%s", (username,)),
             ("UPDATE radcheck SET enable=%s WHERE username=%s", (enable, username)),
+            ("UPDATE fr_entity_type SET description=%s WHERE username=%s", (description, username)),
         ]
 
         if entity_type == ENTITY_TYPE_USER and password:
@@ -516,6 +539,14 @@ class FreeRadiusMySQLClient:
             )
 
         await self.transaction(statements)
+
+    async def get_user_entity(self, username: str) -> dict[str, Any] | None:
+        """Return entity metadata from fr_entity_type for a username."""
+        return await self.fetch_one(
+            "SELECT username, entity_type, COALESCE(description, '') AS description "
+            "FROM fr_entity_type WHERE username=%s LIMIT 1",
+            (username,),
+        )
 
     async def delete_user(self, username: str) -> None:
         """Delete entity from all managed tables."""

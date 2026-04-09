@@ -124,7 +124,7 @@ class UsersPage extends LitElement {
 
     .list-row {
       display: grid;
-      grid-template-columns: 1.1fr 0.7fr 0.9fr 1.1fr auto;
+      grid-template-columns: 1.1fr 1.1fr 0.7fr 0.9fr 1.1fr auto;
       gap: 8px;
       align-items: center;
       border-bottom: 1px solid #eef2f5;
@@ -190,6 +190,7 @@ class UsersPage extends LitElement {
 
   constructor() {
     super();
+    this._loadSeq = 0;
     this._rows = [];
     this._groups = [];
     this._loading = false;
@@ -216,6 +217,7 @@ class UsersPage extends LitElement {
     return {
       username: "",
       password: "",
+      description: "",
       enable: "Y",
       entity_type: "user",
       groups: [],
@@ -236,6 +238,7 @@ class UsersPage extends LitElement {
   async _load() {
     this._loading = true;
     this._error = "";
+    const loadSeq = ++this._loadSeq;
     const params = new URLSearchParams({
       page: String(this._page),
       page_size: String(this._pageSize),
@@ -251,6 +254,9 @@ class UsersPage extends LitElement {
 
     try {
       const data = await apiCall(`/api/ha_radius_access/users?${params.toString()}`);
+      if (loadSeq !== this._loadSeq) {
+        return;
+      }
       this._rows = data.items || [];
       this._total = data.total || 0;
     } catch (err) {
@@ -274,6 +280,7 @@ class UsersPage extends LitElement {
       this._form = {
         username: row.username,
         password: "",
+        description: (typeof details.description === "string" ? details.description : row.description) || "",
         enable: row.enable || "Y",
         entity_type: row.entity_type,
         groups: (details.groups || []).map((g) => g.groupname),
@@ -443,6 +450,7 @@ class UsersPage extends LitElement {
       <section class="card">
         <div class="list-row head">
           <div>Username</div>
+          <div>Description</div>
           <div>Type</div>
           <div>Enable</div>
           <div>Group</div>
@@ -455,9 +463,10 @@ class UsersPage extends LitElement {
               (row) => html`
                 <div class="list-row">
                   <div>${row.username}</div>
+                  <div>${row.description || "-"}</div>
                   <div>${row.entity_type}</div>
                   <div>${row.enable}</div>
-                  <div>${row.groupname || "-"}</div>
+                  <div>${row.groupnames || "-"}</div>
                   <div class="actions">
                     <button @click=${() => this._openEdit(row)}>Edit</button>
                     <button @click=${() => this._openDetails(row)}>Details</button>
@@ -511,6 +520,14 @@ class UsersPage extends LitElement {
               type="password"
               .value=${this._form.password}
               @input=${(ev) => (this._form = { ...this._form, password: ev.target.value })}
+            />
+          </label>
+
+          <label>
+            Description
+            <input
+              .value=${this._form.description || ""}
+              @input=${(ev) => (this._form = { ...this._form, description: ev.target.value })}
             />
           </label>
 

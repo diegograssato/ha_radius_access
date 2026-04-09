@@ -1,7 +1,21 @@
 export async function apiCall(path, options = {}) {
-  const response = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
+  const method = String(options.method || "GET").toUpperCase();
+  let requestPath = path;
+  if (method === "GET") {
+    const url = new URL(path, window.location.origin);
+    url.searchParams.set("_ts", String(Date.now()));
+    requestPath = `${url.pathname}?${url.searchParams.toString()}`;
+  }
+
+  const response = await fetch(requestPath, {
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-cache, no-store, must-revalidate",
+      Pragma: "no-cache",
+      Expires: "0",
+    },
     credentials: "same-origin",
+    cache: "no-store",
     ...options,
   });
 

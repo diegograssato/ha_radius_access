@@ -1,6 +1,20 @@
 # HA Radius Access (Home Assistant Custom Component)
 
-Painel administrativo para Home Assistant com backend em Python para gerenciar MySQL do FreeRADIUS.
+<img align="left" width="90" height="90" src="icon.png" alt="App icon">
+
+# HA Radius Access (Home Assistant Custom Component)
+
+
+_Painel administrativo para Home Assistant com backend em Python para gerenciar usuários, grupos e MAC FreeRADIUS._
+
+
+**This component will set up the following platforms.**
+
+Platform | Description
+-- | --
+`ha_radius_access` | Painel administrativo para Home Assistant com backend em Python.
+
+
 
 ## Recursos
 
@@ -57,6 +71,7 @@ custom_components/ha_radius_access/
 ```sql
 CREATE TABLE fr_entity_type (
 	username VARCHAR(64) NOT NULL PRIMARY KEY,
+	description VARCHAR(255) NULL,
 	entity_type ENUM('user', 'mac') NOT NULL,
 	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -73,16 +88,16 @@ Importante: a integração **não cria schema automaticamente**. Se faltar a tab
 4. Selecione **FreeRADIUS Manager**.
 5. Informe host, porta, usuário, senha e database do MySQL.
 
+
 ## Painel Web
 
 Após configurar a integração, o painel aparece na barra lateral como **FreeRADIUS**.
 
 Páginas:
 
-- Users & MAC
-- Groups
-- Group Checks
-- Config
+- Usuários & MAC
+- Grupo
+- Configurações
 
 ## Regras de Negócio Implementadas
 

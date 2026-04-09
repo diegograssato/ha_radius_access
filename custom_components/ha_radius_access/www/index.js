@@ -8,6 +8,8 @@ class HaRadiusAccessPanel extends HTMLElement {
     this._hass = null;
     this._eventsBound = false;
     this._loadedOnce = false;
+    this._usersRequestSeq = 0;
+    this._groupsRequestSeq = 0;
     this._state = {
       tab: "users",
       usersView: "list",
@@ -34,6 +36,7 @@ class HaRadiusAccessPanel extends HTMLElement {
       groupAttributes: [],
       editingGroupAttrIndex: null,
       editingUserEnable: "Y",
+      editingDescription: "",
       userDetails: null,
       userReplyAttributes: [],
       editingReplyIndex: null,
@@ -169,6 +172,7 @@ class HaRadiusAccessPanel extends HTMLElement {
     return {
       username: this._value("users-username"),
       password: this._value("users-password"),
+      description: this._value("users-description"),
       groups: this._getMultiSelectValues("users-groups"),
       replyAttribute: this._value("users-reply-attribute"),
       replyValue: this._value("users-reply-value"),
@@ -178,6 +182,7 @@ class HaRadiusAccessPanel extends HTMLElement {
   _restoreUserFormDraft(draft) {
     this._setValue("users-username", draft.username || "");
     this._setValue("users-password", draft.password || "");
+    this._setValue("users-description", draft.description || "");
     this._setMultiSelectValues("users-groups", draft.groups || []);
     this._setValue("users-reply-attribute", draft.replyAttribute || "");
     this._setValue("users-reply-value", draft.replyValue || "");
@@ -487,7 +492,12 @@ class HaRadiusAccessPanel extends HTMLElement {
   }
 
   async _loadGroups() {
-    this._state.groupsRaw = await this._api("/api/ha_radius_access/groups");
+    const requestSeq = ++this._groupsRequestSeq;
+    const rows = await this._api("/api/ha_radius_access/groups");
+    if (requestSeq !== this._groupsRequestSeq) {
+      return;
+    }
+    this._state.groupsRaw = rows;
     const totalGroups = this._groupMap().size;
     const totalPages = Math.max(1, Math.ceil(totalGroups / this._state.groupsPageSize));
     if (this._state.groupsPage > totalPages) {
@@ -532,7 +542,11 @@ class HaRadiusAccessPanel extends HTMLElement {
       params.set("groupname", this._state.userGroupFilter);
     }
 
+    const requestSeq = ++this._usersRequestSeq;
     const data = await this._api(`/api/ha_radius_access/users?${params.toString()}`);
+    if (requestSeq !== this._usersRequestSeq) {
+      return;
+    }
     this._state.users = data.items || [];
     this._state.totalUsers = data.total || 0;
     const totalPages = Math.max(1, Math.ceil((this._state.totalUsers || 0) / this._state.usersPageSize));
@@ -540,6 +554,15 @@ class HaRadiusAccessPanel extends HTMLElement {
       this._state.usersPage = totalPages;
     }
     this._renderContent();
+  }
+
+
+  async _refreshAfterUserMutation() {
+    await Promise.all([this._loadUsers(), this._loadGroupNames()]);
+  }
+
+  async _refreshAfterGroupMutation() {
+    await Promise.all([this._loadGroups(), this._loadGroupNames(), this._loadUsers()]);
   }
 
   async _saveGroup() {
@@ -565,7 +588,7 @@ class HaRadiusAccessPanel extends HTMLElement {
     this._state.editingGroupName = null;
     this._state.groupAttributes = [];
     this._state.editingGroupAttrIndex = null;
-    await this._loadGroups();
+    await this._refreshAfterGroupMutation();
   }
 
   _openNewGroupForm() {
@@ -665,7 +688,7 @@ class HaRadiusAccessPanel extends HTMLElement {
     }
     await this._api(`/api/ha_radius_access/groups?groupname=${encodeURIComponent(groupname)}`, "DELETE");
     this._setStatus(`Grupo ${groupname} excluido.`, false);
-    await this._loadGroups();
+    await this._refreshAfterGroupMutation();
   }
 
   async _toggleGroup(groupname) {
@@ -701,7 +724,7 @@ class HaRadiusAccessPanel extends HTMLElement {
 
     const newStatus = nextValue === "Accept" ? "Ativo" : "Inativo";
     this._setStatus(`Status de ${groupname} alterado para ${newStatus}.`, false);
-    await this._loadGroups();
+    await this._refreshAfterGroupMutation();
   }
 
   async _saveUser() {
@@ -730,6 +753,7 @@ class HaRadiusAccessPanel extends HTMLElement {
       password: formType === "mac" ? null : this._value("users-password"),
       enable: this._state.editingUsername ? (this._state.editingUserEnable || "Y") : "Y",
       entity_type: formType,
+      description: this._value("users-description"),
       groups,
       reply_attributes: replyAttributes,
     };
@@ -763,7 +787,7 @@ class HaRadiusAccessPanel extends HTMLElement {
       this._setStatus(`Usuario ${payload.username} criado.`, false);
     }
 
-    await this._loadUsers();
+    await this._refreshAfterUserMutation();
     this._resetUserFormState();
     this._state.usersView = "list";
     this._renderContent();
@@ -798,8 +822,10 @@ class HaRadiusAccessPanel extends HTMLElement {
     this._state.editingReplyIndex = null;
     this._state.userDetails = null;
     this._state.editingUserEnable = "Y";
+    this._state.editingDescription = "";
     this._setValue("users-username", "");
     this._setValue("users-password", "");
+    this._setValue("users-description", "");
     this._clearMultiSelect("users-groups");
     this._setValue("users-reply-attribute", "");
     this._setValue("users-reply-value", "");
@@ -912,6 +938,10 @@ class HaRadiusAccessPanel extends HTMLElement {
     this._state.editingUsername = username;
     this._state.userFormType = row && row.entity_type ? row.entity_type : "user";
     this._state.editingUserEnable = row && row.enable ? row.enable : "Y";
+    this._state.editingDescription =
+      details && typeof details.description === "string"
+        ? details.description
+        : (row && row.description) || "";
 
     this._state.userReplyAttributes = (details.reply_attributes || []).map((x) => ({
       id: x.id,
@@ -924,6 +954,7 @@ class HaRadiusAccessPanel extends HTMLElement {
 
     this._setValue("users-username", username);
     this._setValue("users-password", "");
+    this._setValue("users-description", this._state.editingDescription || "");
     this._setMultiSelectValues("users-groups", (details.groups || []).map((x) => x.groupname));
     this._setValue("users-reply-attribute", "");
     this._setValue("users-reply-value", "");
@@ -936,7 +967,7 @@ class HaRadiusAccessPanel extends HTMLElement {
     }
     await this._api(`/api/ha_radius_access/users?username=${encodeURIComponent(username)}`, "DELETE");
     this._setStatus(`Usuario ${username} excluido.`, false);
-    await this._loadUsers();
+    await this._refreshAfterUserMutation();
   }
 
   async _toggleUser(username, enabledNow) {
@@ -944,7 +975,7 @@ class HaRadiusAccessPanel extends HTMLElement {
       username,
     });
     this._setStatus(`Status de ${username} alterado para ${result.enable || "N"}.`, false);
-    await this._loadUsers();
+    await this._refreshAfterUserMutation();
   }
 
   async _showUserDetails(username, resetDateRange = true) {
@@ -979,72 +1010,88 @@ class HaRadiusAccessPanel extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>
         :host {
+          --op-bg-0: #0f1420;
+          --op-bg-1: #1a2233;
+          --op-bg-2: #222c3e;
+          --op-bg-3: #2a3447;
+          --op-line: #7d8797;
+          --op-text: #e8edf5;
+          --op-text-soft: #b7c1cf;
+          --op-header: #121928;
+          --op-accent: #d36526;
+          --op-accent-2: #f07b33;
+          --op-danger: #c44545;
           display: block;
           min-height: 100%;
-          font-family: "Manrope", "Segoe UI", Arial, sans-serif;
-          color: #1f2a37;
+          font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+          color: var(--op-text);
           background:
-            radial-gradient(circle at 90% -10%, rgba(12, 122, 105, 0.16), transparent 34%),
-            radial-gradient(circle at 0% 120%, rgba(21, 114, 182, 0.18), transparent 38%),
-            linear-gradient(135deg, #f8f8ef 0%, #edf9f4 52%, #e7f4ff 100%);
+            linear-gradient(180deg, rgba(33, 43, 64, 0.44) 0%, rgba(15, 20, 32, 0) 100%),
+            linear-gradient(140deg, #0e1320 0%, #161e30 42%, #1b253a 100%);
           padding: 18px;
           box-sizing: border-box;
         }
         .card {
-          background: rgba(255, 255, 255, 0.97);
-          border: 1px solid #cde3dd;
-          border-radius: 18px;
+          background: linear-gradient(180deg, var(--op-bg-1) 0%, #141b2a 100%);
+          border: 1px solid #5d6880;
+          border-radius: 4px;
           padding: 18px;
-          box-shadow: 0 16px 36px rgba(15, 32, 53, 0.1);
+          box-shadow: 0 18px 34px rgba(0, 0, 0, 0.28);
           margin: 0 auto;
           max-width: 1180px;
         }
         h2 {
-          margin: 0 0 8px;
-          font-size: 1.28rem;
+          margin: 0 0 4px;
+          font-size: 2rem;
+          font-weight: 600;
           letter-spacing: 0.01em;
+          color: #eef2f9;
         }
         .subtitle {
-          margin: 0 0 14px;
-          color: #4f6274;
-          font-size: 0.94rem;
+          margin: 0 0 16px;
+          color: var(--op-text-soft);
+          font-size: 0.92rem;
         }
         .tabs {
           display: flex;
           gap: 8px;
           flex-wrap: wrap;
           margin-bottom: 14px;
+          border-top: 1px solid #6a7384;
+          border-bottom: 1px solid #6a7384;
+          padding: 10px 0;
         }
         .tab {
-          border: 1px solid #b9c9d8;
-          border-radius: 999px;
-          background: linear-gradient(180deg, #ffffff 0%, #f6f8fb 100%);
-          padding: 8px 13px;
+          border: 1px solid #707b8d;
+          border-radius: 4px;
+          background: linear-gradient(180deg, #2a3447 0%, #212a3b 100%);
+          padding: 8px 12px;
           cursor: pointer;
-          font-weight: 700;
-          color: #466175;
+          font-weight: 600;
+          color: #d9e1ee;
         }
         .tab.active {
-          background: #0c7a69;
-          color: #fff;
-          border-color: #0c7a69;
+          background: linear-gradient(180deg, var(--op-accent-2) 0%, var(--op-accent) 100%);
+          color: #fff8f2;
+          border-color: #f2a36f;
         }
         .status {
           margin: 8px 0 16px;
           padding: 10px;
-          border-radius: 8px;
+          border-radius: 4px;
           font-size: 0.91rem;
-          border: 1px solid transparent;
+          border: 1px solid #6c7688;
+          background: #1a2233;
         }
         .status.ok {
-          background: #ecf9f5;
-          color: #0c7a69;
-          border-color: #c7e9df;
+          background: #1c2738;
+          color: #cde9d8;
+          border-color: #4d7b63;
         }
         .status.error {
-          background: #fdf1f0;
-          color: #b3261e;
-          border-color: #efcecb;
+          background: #382229;
+          color: #ffd6d6;
+          border-color: #9f5865;
         }
         .sr-only {
           position: absolute;
@@ -1062,38 +1109,50 @@ class HaRadiusAccessPanel extends HTMLElement {
           gap: 12px;
         }
         .panel {
-          border: 1px solid #dbe8ef;
-          border-radius: 14px;
-          background: #ffffff;
+          border: 1px solid #6d788d;
+          border-radius: 3px;
+          background: linear-gradient(180deg, #111827 0%, #0d1422 100%);
           padding: 14px;
-          box-shadow: 0 8px 20px rgba(20, 37, 56, 0.05);
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
         }
         .panel h3 {
           margin: 0 0 10px;
-          color: #24445a;
-          font-size: 1.02rem;
+          color: #f0f4fb;
+          font-size: 1.05rem;
+          border-bottom: 1px solid #4f5b71;
+          padding-bottom: 8px;
         }
         .section {
           margin-top: 6px;
         }
+        p {
+          color: #d6ddec;
+        }
         label {
           font-size: 0.82rem;
-          color: #4e6175;
+          color: #c6cfde;
           display: block;
           margin: 6px 0 4px;
         }
         input, select, textarea {
           width: 100%;
           box-sizing: border-box;
-          border: 1px solid #c5d3df;
-          border-radius: 8px;
+          border: 1px solid #727d90;
+          border-radius: 3px;
           padding: 9px;
           font-size: 0.9rem;
-          background: #e5edf3;
+          background: #0d1422;
           transition: all 0.2s ease;
-          color: #000;
+          color: #eef3ff;
         }
-         
+        input:focus, select:focus, textarea:focus {
+          outline: none;
+          border-color: #e18b58;
+          box-shadow: 0 0 0 2px rgba(211, 101, 38, 0.25);
+        }
+        input::placeholder {
+          color: #8f9db2;
+        }
         textarea { min-height: 92px; }
         .row {
           display: flex;
@@ -1101,16 +1160,28 @@ class HaRadiusAccessPanel extends HTMLElement {
           flex-wrap: wrap;
           margin-top: 10px;
         }
+        .row.meta {
+          justify-content: space-between;
+          align-items: center;
+          border: 1px solid #59657c;
+          border-radius: 3px;
+          background: #1c2639;
+          padding: 8px 10px;
+        }
         button.action {
-          border: 1px solid #b5c6d5;
-          border-radius: 8px;
-          background: linear-gradient(180deg, #ffffff 0%, #f4f7fa 100%);
+          border: 1px solid #808ca1;
+          border-radius: 3px;
+          background: linear-gradient(180deg, #2a3447 0%, #1f283a 100%);
           padding: 8px 11px;
           cursor: pointer;
-          font-weight: 700;
-          color: #2a4458;
+          font-weight: 600;
+          color: #e8edf5;
         }
-        button.action:hover { filter: brightness(0.98); }
+        button.action:hover { filter: brightness(1.08); }
+        button.action[disabled] {
+          opacity: 0.45;
+          cursor: not-allowed;
+        }
         button.icon-action {
           min-width: 34px;
           padding: 6px 8px;
@@ -1121,37 +1192,74 @@ class HaRadiusAccessPanel extends HTMLElement {
         button.icon-action ha-icon {
           --mdc-icon-size: 18px;
         }
+        button.primary {
+          border-color: #f0a069;
+          background: linear-gradient(180deg, var(--op-accent-2) 0%, var(--op-accent) 100%);
+          color: #ffffff;
+        }
+        button.danger {
+          border-color: #c46d6d;
+          background: linear-gradient(180deg, #74313b 0%, #5e2430 100%);
+          color: #fff0f0;
+        }
         table {
           width: 100%;
           border-collapse: collapse;
           margin-top: 10px;
           font-size: 0.92rem;
-          background: #fff;
-          border: 1px solid #e5edf3;
-          border-radius: 10px;
+          background: #111a2b;
+          border: 1px solid #6a7488;
+          border-radius: 3px;
           overflow: hidden;
         }
-        th { background: #f4f9fc; color: #3f5c71; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; }
+        th {
+          background: #222d42;
+          color: #e6edf8;
+          font-size: 0.8rem;
+          text-transform: uppercase;
+          letter-spacing: 0.03em;
+          border-bottom: 1px solid #717b91;
+        }
         th, td {
-          border-bottom: 1px solid #ebedf0;
+          border-bottom: 1px solid #2e394d;
           text-align: left;
           padding: 8px;
         }
+        tr:nth-child(even) td {
+          background: #151f32;
+        }
+        tr:hover td {
+          background: #1f2a3f;
+        }
         td.actions-col { white-space: nowrap; }
-        hr { border: none; border-top: 1px solid #e5edf3; margin: 14px 0; }
+        hr { border: none; border-top: 1px solid #475268; margin: 14px 0; }
         code {
-          background: #f2f7fb;
-          border: 1px solid #dce8f2;
+          background: #232f45;
+          border: 1px solid #6d798f;
           padding: 1px 6px;
-          border-radius: 6px;
+          border-radius: 3px;
+          color: #f3f6fc;
+        }
+        .op-operator {
+          width: 70px;
+          align-self: end;
+          text-align: center;
+          font-weight: 700;
+          color: #f3ad78;
+          background: #202b41;
+          border: 1px solid #677287;
+          border-radius: 3px;
+          padding: 8px 0;
+          box-sizing: border-box;
         }
         @media (max-width: 900px) {
           .grid { grid-template-columns: 1fr; }
+          h2 { font-size: 1.45rem; }
         }
       </style>
       <div class="card">
-        <h2>HA Radius Access</h2>
-        <p class="subtitle">Gerenciamento usuário e dispositivos.</p>
+        <h2>System: HA Radius Access</h2>
+        <p class="subtitle">Interface de gerenciamento Freeradius, para contrele de usuário e devices.</p>
         <div class="tabs">
           <button class="tab ${this._state.tab === "users" ? "active" : ""}" data-tab="users">Usuários & MAC</button>
           <button class="tab ${this._state.tab === "groups" ? "active" : ""}" data-tab="groups">Grupos de acesso</button>
@@ -1194,7 +1302,7 @@ class HaRadiusAccessPanel extends HTMLElement {
           </div>
         </div>
         <div class="row">
-          <button class="action" data-action="service-sync">Executar sync_users</button>
+          <button class="action primary" data-action="service-sync">Executar sync_users</button>
           <button class="action" data-action="service-disconnect">Executar disconnect_user</button>
         </div>
         </div>
@@ -1229,7 +1337,7 @@ class HaRadiusAccessPanel extends HTMLElement {
           <td class="actions-col">
             <button class="action icon-action" title="${isActive ? "Desabilitar" : "Habilitar"}" data-action="groups-toggle" data-group="${groupname}" data-auth-type="${authType}"><ha-icon icon="${isActive ? "mdi:toggle-switch-off-outline" : "mdi:toggle-switch"}"></ha-icon><span class="sr-only">${isActive ? "Desabilitar" : "Habilitar"}</span></button>
             <button class="action icon-action" title="Editar" data-action="groups-edit" data-group="${groupname}"><ha-icon icon="mdi:pencil"></ha-icon><span class="sr-only">Editar</span></button>
-            <button class="action icon-action" title="Excluir" data-action="groups-delete" data-group="${groupname}"><ha-icon icon="mdi:trash-can-outline"></ha-icon><span class="sr-only">Excluir</span></button>
+            <button class="action icon-action danger" title="Excluir" data-action="groups-delete" data-group="${groupname}"><ha-icon icon="mdi:trash-can-outline"></ha-icon><span class="sr-only">Excluir</span></button>
           </td>
         </tr>
       `;
@@ -1241,7 +1349,7 @@ class HaRadiusAccessPanel extends HTMLElement {
         <div class="panel">
           <h3>Lista de Grupos</h3>
           <div class="row">
-            <button class="action" data-action="groups-new">Cadastrar Novo Grupo</button>
+            <button class="action primary" data-action="groups-new">Cadastrar Novo Grupo</button>
           </div>
 
           <div class="row">
@@ -1255,7 +1363,7 @@ class HaRadiusAccessPanel extends HTMLElement {
             </div>
           </div>
 
-          <div class="row" style="justify-content: space-between; align-items: center;">
+          <div class="row meta">
             <p>Total: ${totalGroups}</p>
             <div>
               <label style="margin-right: 8px;">Itens por pagina</label>
@@ -1307,7 +1415,7 @@ class HaRadiusAccessPanel extends HTMLElement {
             <td>${r.value}</td>
             <td>
               <button class="action" data-action="groups-attr-edit" data-index="${idx}">Editar</button>
-              <button class="action" data-action="groups-attr-delete" data-index="${idx}">Excluir</button>
+              <button class="action danger" data-action="groups-attr-delete" data-index="${idx}">Excluir</button>
             </td>
           </tr>
         `
@@ -1334,14 +1442,14 @@ class HaRadiusAccessPanel extends HTMLElement {
                 ${attributeOptions.map((attr) => `<option value="${attr}">${attr}</option>`).join("")}
               </select>
             </div>
-            <div style="width: 70px; align-self: end; text-align: center; font-weight: 700; color: #3f5c71;">:=</div>
+            <div class="op-operator">:=</div>
             <div style="flex: 1 1 220px;">
               <label>Valor</label>
               <input id="groups-attr-value" placeholder="10.0.0.0/24 192.168.1.1 1" />
             </div>
           </div>
           <div class="row">
-            <button class="action" data-action="groups-attr-add">${this._state.editingGroupAttrIndex != null ? "Salvar Atributo" : "Adicionar Atributo"}</button>
+            <button class="action primary" data-action="groups-attr-add">${this._state.editingGroupAttrIndex != null ? "Salvar Atributo" : "Adicionar Atributo"}</button>
           </div>
 
           <table>
@@ -1350,7 +1458,7 @@ class HaRadiusAccessPanel extends HTMLElement {
           </table>
 
           <div class="row">
-            <button class="action" data-action="groups-save">Salvar Grupo</button>
+            <button class="action primary" data-action="groups-save">Salvar Grupo</button>
           </div>
         </div>
       </div>
@@ -1373,12 +1481,13 @@ class HaRadiusAccessPanel extends HTMLElement {
         (u) => `
           <tr>
             <td><ha-icon icon="${u.entity_type === "user" ? "mdi:account" : "mdi:desktop-tower"}"></ha-icon> ${u.username}</td>
+            <td>${u.description || "-"}</td>
             <td>${u.groupnames || "-"}</td>
             <td class="actions-col">
               <button class="action icon-action" title="Editar" data-action="users-edit" data-username="${u.username}"><ha-icon icon="mdi:pencil"></ha-icon><span class="sr-only">Editar</span></button>
               <button class="action icon-action" title="Detalhes" data-action="users-details" data-username="${u.username}"><ha-icon icon="mdi:card-account-details"></ha-icon><span class="sr-only">Detalhes</span></button>
               <button class="action icon-action" title="${u.enable === "Y" ? "Desabilitar" : "Habilitar"}" data-action="users-toggle" data-username="${u.username}" data-enable="${u.enable || "N"}"><ha-icon icon="${u.enable === "Y" ? "mdi:toggle-switch-off-outline" : "mdi:toggle-switch"}"></ha-icon><span class="sr-only">${u.enable === "Y" ? "Desabilitar" : "Habilitar"}</span></button>
-              <button class="action icon-action" title="Excluir" data-action="users-delete" data-username="${u.username}"><ha-icon icon="mdi:trash-can-outline"></ha-icon><span class="sr-only">Excluir</span></button>
+              <button class="action icon-action danger" title="Excluir" data-action="users-delete" data-username="${u.username}"><ha-icon icon="mdi:trash-can-outline"></ha-icon><span class="sr-only">Excluir</span></button>
             </td>
           </tr>
         `
@@ -1389,6 +1498,10 @@ class HaRadiusAccessPanel extends HTMLElement {
       <div class="section">
         <div class="panel">
           <h3>Busca e Listagem de Usuarios/MAC</h3>
+          <div class="row">
+            <button class="action primary" data-action="users-new-user">Cadastrar Usuario</button>
+            <button class="action primary" data-action="users-new-mac">Cadastrar MAC</button>
+          </div>
           <div class="grid">
             <div>
               <label>Busca</label>
@@ -1402,22 +1515,20 @@ class HaRadiusAccessPanel extends HTMLElement {
                 <option value="mac" ${this._state.entityTypeFilter === "mac" ? "selected" : ""}>MAC</option>
               </select>
             </div>
-            <div>
-              <label>Filtro por grupo</label>
-              <select id="users-group-filter">
-                <option value="" ${!this._state.userGroupFilter ? "selected" : ""}>Todos</option>
-                ${(this._state.groupNames || []).map((g) => `<option value="${g}" ${this._state.userGroupFilter === g ? "selected" : ""}>${g}</option>`).join("")}
-              </select>
+            <div style="display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: end;">
+              <div>
+                <label>Filtro por grupo</label>
+                <select id="users-group-filter" style="margin-bottom: 0;">
+                  <option value="" ${!this._state.userGroupFilter ? "selected" : ""}>Todos</option>
+                  ${(this._state.groupNames || []).map((g) => `<option value="${g}" ${this._state.userGroupFilter === g ? "selected" : ""}>${g}</option>`).join("")}
+                </select>
+              </div>
+              <button class="action primary" data-action="users-search">Buscar</button>
+              <button class="action" data-action="users-clear-filters">Limpar</button>
             </div>
           </div>
-          <div class="row">
-            <button class="action" data-action="users-search">Buscar</button>
-            <button class="action" data-action="users-clear-filters">Limpar Filtros</button>
-            <button class="action" data-action="users-new-user">Cadastrar Usuario</button>
-            <button class="action" data-action="users-new-mac">Cadastrar MAC</button>
-          </div>
 
-          <div class="row" style="justify-content: space-between; align-items: center;">
+          <div class="row meta">
             <p>Total: ${this._state.totalUsers}</p>
             <div>
               <label style="margin-right: 8px;">Itens por pagina</label>
@@ -1429,8 +1540,8 @@ class HaRadiusAccessPanel extends HTMLElement {
             </div>
           </div>
           <table>
-            <thead><tr><th>Usuario / MAC</th><th>Grupos</th><th>Acoes</th></tr></thead>
-            <tbody>${rows || `<tr><td colspan="3">Sem usuarios</td></tr>`}</tbody>
+            <thead><tr><th>Usuario / MAC</th><th>Descricao</th><th>Grupos</th><th>Acoes</th></tr></thead>
+            <tbody>${rows || `<tr><td colspan="4">Sem usuarios</td></tr>`}</tbody>
           </table>
 
           <div class="row" style="justify-content: space-between; margin-top: 12px;">
@@ -1469,7 +1580,7 @@ class HaRadiusAccessPanel extends HTMLElement {
             <td>${r.value}</td>
             <td>
               <button class="action" data-action="users-reply-edit" data-index="${idx}">Editar</button>
-              <button class="action" data-action="users-reply-delete" data-index="${idx}">Excluir</button>
+              <button class="action danger" data-action="users-reply-delete" data-index="${idx}">Excluir</button>
             </td>
           </tr>
         `
@@ -1486,6 +1597,8 @@ class HaRadiusAccessPanel extends HTMLElement {
 
           <label>Username / MAC</label>
           <input id="users-username" placeholder="${this._state.userFormType === "mac" ? "BC:24:11:B5:7B:CD" : "usuario"}" />
+          <label>Descricao (${this._state.userFormType === "mac" ? "nome do device" : "nome completo"})</label>
+          <input id="users-description" placeholder="${this._state.userFormType === "mac" ? "Ex.: AP Sala" : "Ex.: Fulano da Silva"}" />
           ${this._state.userFormType === "user" ? `
             <label>Password (user)</label>
             <input id="users-password" type="password" />
@@ -1504,14 +1617,14 @@ class HaRadiusAccessPanel extends HTMLElement {
                 ${replyAttributeOptions.map((attr) => `<option value="${attr}">${attr}</option>`).join("")}
               </select>
             </div>
-            <div style="width: 70px; align-self: end; text-align: center; font-weight: 700; color: #3f5c71;">:=</div>
+            <div class="op-operator">:=</div>
             <div style="flex: 1 1 220px;">
               <label>Valor</label>
               <input id="users-reply-value" placeholder="valor do atributo" />
             </div>
           </div>
           <div class="row">
-            <button class="action" data-action="users-reply-add">${this._state.editingReplyIndex != null ? "Salvar Reply" : "Adicionar Reply"}</button>
+            <button class="action primary" data-action="users-reply-add">${this._state.editingReplyIndex != null ? "Salvar Reply" : "Adicionar Reply"}</button>
           </div>
 
           <table>
@@ -1519,7 +1632,7 @@ class HaRadiusAccessPanel extends HTMLElement {
             <tbody>${replyRows || `<tr><td colspan="4">Sem reply attrs adicionados</td></tr>`}</tbody>
           </table>
           <div class="row">
-            <button class="action" data-action="users-save">Salvar Usuario/MAC</button>
+            <button class="action primary" data-action="users-save">Salvar Usuario/MAC</button>
           </div>
         </div>
       </div>
@@ -1530,6 +1643,7 @@ class HaRadiusAccessPanel extends HTMLElement {
     const details = this._state.userDetails || {};
     const username = details.username || "-";
     const stats = details.stats || {};
+    const description = details.description || "-";
     const groups = details.groups || [];
     const replies = details.reply_attributes || [];
     const history = (stats.history || []).slice(0, 20);
@@ -1557,6 +1671,7 @@ class HaRadiusAccessPanel extends HTMLElement {
       <div class="section">
         <div class="panel">
           <h3><ha-icon icon="mdi:card-account-details"></ha-icon> Detalhes do Usuario: ${username}</h3>
+          <p><strong>Descricao:</strong> ${description}</p>
           <div class="row">
             <button class="action" data-action="users-back">Voltar</button>
             <button class="action" data-action="users-edit" data-username="${username}">Editar Usuario</button>

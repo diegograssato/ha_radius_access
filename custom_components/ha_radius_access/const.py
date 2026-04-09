@@ -22,7 +22,7 @@ PANEL_FRONTEND_URL_PATH = "ha-radius-access"
 PANEL_WEBCOMPONENT_NAME = "ha-radius-access-panel"
 PANEL_TITLE = "HA Radius Access"
 PANEL_ICON = "mdi:account-network"
-PANEL_MODULE_URL = "/ha_radius_access_static/index.js?v=20260407c"
+PANEL_MODULE_URL = "/ha_radius_access_static/index.js?v=20260409a"
 
 ENTITY_TYPE_USER = "user"
 ENTITY_TYPE_MAC = "mac"
@@ -46,7 +46,6 @@ GROUP_ALLOWED_ATTRIBUTES = [
     "Tunnel-Private-Group-Id",
 ]
 
-ENABLE_ATTRIBUTE = "Enable"
 ENABLE_ON = "Y"
 ENABLE_OFF = "N"
 

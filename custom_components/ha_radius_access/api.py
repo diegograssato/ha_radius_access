@@ -55,6 +55,18 @@ def _safe_int(value: Any, fallback: int, min_value: int = 1, max_value: int = 10
     return max(min_value, min(max_value, parsed))
 
 
+def _sanitize_optional_text(value: Any, field: str, max_len: int = 255) -> str | None:
+    """Normalize optional text field where blank maps to null."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if len(text) > max_len:
+        raise vol.Invalid(f"{field} max length is {max_len}")
+    return text
+
+
 class FreeRadiusAPIBaseView(HomeAssistantView):
     """Common helpers for API views."""
 
@@ -303,6 +315,7 @@ class FreeRadiusUsersView(FreeRadiusAPIBaseView):
 
             groups = payload.get("groups", [])
             clean_groups = [_sanitize_text(item, "group", 64) for item in groups]
+            description = _sanitize_optional_text(payload.get("description"), "description", 255)
 
             reply_attributes = payload.get("reply_attributes", [])
             clean_reply = [
@@ -319,6 +332,7 @@ class FreeRadiusUsersView(FreeRadiusAPIBaseView):
                 password=password,
                 enable=enable,
                 entity_type=entity_type,
+                description=description,
                 groups=clean_groups,
                 reply_attributes=clean_reply,
             )
@@ -345,6 +359,7 @@ class FreeRadiusUsersView(FreeRadiusAPIBaseView):
 
             groups = payload.get("groups", [])
             clean_groups = [_sanitize_text(item, "group", 64) for item in groups]
+            description = _sanitize_optional_text(payload.get("description"), "description", 255)
 
             reply_attributes = payload.get("reply_attributes", [])
             clean_reply = [
@@ -360,6 +375,7 @@ class FreeRadiusUsersView(FreeRadiusAPIBaseView):
                 username=username,
                 password=password,
                 enable=enable,
+                description=description,
                 groups=clean_groups,
                 reply_attributes=clean_reply,
             )
@@ -435,11 +451,14 @@ class FreeRadiusUserDetailsView(FreeRadiusAPIBaseView):
                 start_date=start_date,
                 end_date=end_date,
             )
+            entity = await self.client.get_user_entity(username)
             replies = await self.client.get_user_reply_attributes(username)
             groups = await self.client.get_user_groups(username)
             return self._ok(
                 {
                     "username": username,
+                    "entity_type": entity["entity_type"] if entity else None,
+                    "description": entity["description"] if entity else "",
                     "start_date": start_date,
                     "end_date": end_date,
                     "stats": stats,
