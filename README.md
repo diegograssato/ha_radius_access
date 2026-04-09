@@ -1,11 +1,9 @@
-# HA Radius Access (Home Assistant Custom Component)
-
 <img align="left" width="90" height="90" src="icon.png" alt="App icon">
 
 # HA Radius Access (Home Assistant Custom Component)
 
 
-_Painel administrativo para Home Assistant com backend em Python para gerenciar usuários, grupos e MAC FreeRADIUS._
+_Painel administrativo para Home Assistant com backend em Python para gerenciar usuários, grupos e MAC no FreeRADIUS com Mysql._
 
 
 **This component will set up the following platforms.**
