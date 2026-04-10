@@ -349,17 +349,15 @@ class HaRadiusAccessPanel extends HTMLElement {
       (this._hass && this._hass.auth && this._hass.auth.accessToken) ||
       (this._hass && this._hass.connection && this._hass.connection.options && this._hass.connection.options.auth && this._hass.connection.options.auth.accessToken);
 
-    if (!token) {
-      throw new Error("Token de autenticacao do Home Assistant indisponivel");
-    }
-
     const headers = {
       Accept: "application/json",
-      Authorization: `Bearer ${token}`,
       "Cache-Control": "no-cache, no-store, must-revalidate",
       Pragma: "no-cache",
       Expires: "0",
     };
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
     if (body) {
       headers["Content-Type"] = "application/json";
     }
@@ -511,6 +509,7 @@ class HaRadiusAccessPanel extends HTMLElement {
   }
 
   async _loadUsers() {
+    // Lê filtros do DOM apenas se os elementos já existirem (evita perda de filtros no carregamento inicial)
     const searchEl = this.shadowRoot.getElementById("users-search");
     if (searchEl instanceof HTMLInputElement) {
       this._state.search = String(searchEl.value || "").trim();
@@ -553,7 +552,18 @@ class HaRadiusAccessPanel extends HTMLElement {
     if (this._state.usersPage > totalPages) {
       this._state.usersPage = totalPages;
     }
+    // Preserva filtros digitados no DOM antes de re-renderizar
+    const prevSearch = this._state.search;
+    const prevType = this._state.entityTypeFilter;
+    const prevGroup = this._state.userGroupFilter;
     this._renderContent();
+    // Restaura valores nos campos após render
+    const sEl = this.shadowRoot.getElementById("users-search");
+    if (sEl instanceof HTMLInputElement && prevSearch) { sEl.value = prevSearch; }
+    const tEl = this.shadowRoot.getElementById("users-filter");
+    if (tEl instanceof HTMLSelectElement && prevType) { tEl.value = prevType; }
+    const gEl = this.shadowRoot.getElementById("users-group-filter");
+    if (gEl instanceof HTMLSelectElement && prevGroup) { gEl.value = prevGroup; }
   }
 
 
@@ -974,7 +984,8 @@ class HaRadiusAccessPanel extends HTMLElement {
     const result = await this._api("/api/ha_radius_access/users/toggle", "POST", {
       username,
     });
-    this._setStatus(`Status de ${username} alterado para ${result.enable || "N"}.`, false);
+    const novoStatus = result.enable === "Y" ? "habilitado" : "desabilitado";
+    this._setStatus(`${username} ${novoStatus} com sucesso.`, false);
     await this._refreshAfterUserMutation();
   }
 
@@ -1255,6 +1266,25 @@ class HaRadiusAccessPanel extends HTMLElement {
         @media (max-width: 900px) {
           .grid { grid-template-columns: 1fr; }
           h2 { font-size: 1.45rem; }
+          .card { padding: 10px; }
+          .tabs { gap: 4px; padding: 8px 0; }
+          .tab { padding: 7px 8px; font-size: 0.82rem; }
+          table { font-size: 0.78rem; }
+          th, td { padding: 6px 4px; }
+          td.actions-col { white-space: normal; }
+          button.icon-action { min-width: 28px; padding: 5px 6px; }
+          button.icon-action ha-icon { --mdc-icon-size: 16px; }
+          .row.meta { flex-direction: column; gap: 6px; }
+        }
+        @media (max-width: 560px) {
+          .card { padding: 6px; border-radius: 0; }
+          h2 { font-size: 1.15rem; }
+          .tabs { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+          .tabs::-webkit-scrollbar { display: none; }
+          .tab { white-space: nowrap; flex-shrink: 0; }
+          table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+          th, td { min-width: 60px; }
+          td.actions-col { min-width: 120px; }
         }
       </style>
       <div class="card">
@@ -1335,7 +1365,7 @@ class HaRadiusAccessPanel extends HTMLElement {
         <tr>
           <td>${groupname}</td>
           <td class="actions-col">
-            <button class="action icon-action" title="${isActive ? "Desabilitar" : "Habilitar"}" data-action="groups-toggle" data-group="${groupname}" data-auth-type="${authType}"><ha-icon icon="${isActive ? "mdi:toggle-switch-off-outline" : "mdi:toggle-switch"}"></ha-icon><span class="sr-only">${isActive ? "Desabilitar" : "Habilitar"}</span></button>
+            <button class="action icon-action" title="${isActive ? "Desabilitar" : "Habilitar"}" data-action="groups-toggle" data-group="${groupname}" data-auth-type="${authType}"><ha-icon icon="${isActive ? "mdi:toggle-switch" : "mdi:toggle-switch-off-outline"}"></ha-icon><span class="sr-only">${isActive ? "Desabilitar" : "Habilitar"}</span></button>
             <button class="action icon-action" title="Editar" data-action="groups-edit" data-group="${groupname}"><ha-icon icon="mdi:pencil"></ha-icon><span class="sr-only">Editar</span></button>
             <button class="action icon-action danger" title="Excluir" data-action="groups-delete" data-group="${groupname}"><ha-icon icon="mdi:trash-can-outline"></ha-icon><span class="sr-only">Excluir</span></button>
           </td>
@@ -1486,7 +1516,7 @@ class HaRadiusAccessPanel extends HTMLElement {
             <td class="actions-col">
               <button class="action icon-action" title="Editar" data-action="users-edit" data-username="${u.username}"><ha-icon icon="mdi:pencil"></ha-icon><span class="sr-only">Editar</span></button>
               <button class="action icon-action" title="Detalhes" data-action="users-details" data-username="${u.username}"><ha-icon icon="mdi:card-account-details"></ha-icon><span class="sr-only">Detalhes</span></button>
-              <button class="action icon-action" title="${u.enable === "Y" ? "Desabilitar" : "Habilitar"}" data-action="users-toggle" data-username="${u.username}" data-enable="${u.enable || "N"}"><ha-icon icon="${u.enable === "Y" ? "mdi:toggle-switch-off-outline" : "mdi:toggle-switch"}"></ha-icon><span class="sr-only">${u.enable === "Y" ? "Desabilitar" : "Habilitar"}</span></button>
+              <button class="action icon-action" title="${u.enable === "Y" ? "Desabilitar" : "Habilitar"}" data-action="users-toggle" data-username="${u.username}" data-enable="${u.enable || "Y"}"><ha-icon icon="${u.enable === "Y" ? "mdi:toggle-switch" : "mdi:toggle-switch-off-outline"}"></ha-icon><span class="sr-only">${u.enable === "Y" ? "Desabilitar" : "Habilitar"}</span></button>
               <button class="action icon-action danger" title="Excluir" data-action="users-delete" data-username="${u.username}"><ha-icon icon="mdi:trash-can-outline"></ha-icon><span class="sr-only">Excluir</span></button>
             </td>
           </tr>

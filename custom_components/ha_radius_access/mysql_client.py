@@ -12,6 +12,7 @@ import aiomysql
 from .const import (
     AUTH_TYPE_ACCEPT,
     AUTH_TYPE_ATTRIBUTE,
+    AUTH_TYPE_DROP,
     AUTH_TYPE_REJECT,
     DEFAULT_OP_EQUAL,
     ENABLE_OFF,
@@ -321,7 +322,9 @@ class FreeRadiusMySQLClient:
         if sort_order.lower() not in {"asc", "desc"}:
             sort_order = "asc"
 
-        where_parts: list[str] = []
+        where_parts: list[str] = [
+            "EXISTS (SELECT 1 FROM radcheck rcx WHERE rcx.username=et.username)"
+        ]
         params: list[Any] = []
 
         if entity_type:
@@ -332,22 +335,21 @@ class FreeRadiusMySQLClient:
             where_parts.append(
                 "EXISTS ("
                 "SELECT 1 FROM radusergroup ugf "
-                "WHERE ugf.username=u.username AND ugf.groupname=%s"
+                "WHERE ugf.username=et.username AND ugf.groupname=%s"
                 ")"
             )
             params.append(groupname)
 
         if search:
-            where_parts.append("(u.username LIKE %s OR COALESCE(et.description, '') LIKE %s)")
+            where_parts.append("(et.username LIKE %s OR COALESCE(et.description, '') LIKE %s)")
             search_like = f"%{search}%"
             params.extend([search_like, search_like])
 
         where_clause = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
 
         count_sql = (
-            "SELECT COUNT(DISTINCT u.username) AS total "
-            "FROM radcheck u "
-            "JOIN fr_entity_type et ON et.username=u.username "
+            "SELECT COUNT(DISTINCT et.username) AS total "
+            "FROM fr_entity_type et "
             f"{where_clause}"
         )
         total_row = await self.fetch_one(count_sql, tuple(params))
@@ -355,26 +357,32 @@ class FreeRadiusMySQLClient:
 
         offset = max(0, (page - 1) * page_size)
         sql = (
-            "SELECT u.username, et.entity_type, COALESCE(et.description, '') AS description, "
+            "SELECT et.username, et.entity_type, COALESCE(et.description, '') AS description, "
             "COALESCE(MAX(CASE "
-            "WHEN UPPER(u.enable)=%s THEN %s "
-            "WHEN UPPER(u.enable)=%s THEN %s "
+            "WHEN rc.attribute=%s AND LOWER(TRIM(rc.value))=LOWER(%s) THEN %s "
+            "WHEN rc.attribute=%s AND LOWER(TRIM(rc.value))=LOWER(%s) THEN %s "
+            "WHEN rc.attribute=%s AND LOWER(TRIM(rc.value))=LOWER(%s) THEN %s "
             "ELSE NULL END), %s) AS enable, "
             "COALESCE(GROUP_CONCAT(DISTINCT g.groupname ORDER BY g.groupname SEPARATOR ', '), '') AS groupnames "
-            "FROM radcheck u "
-            "JOIN fr_entity_type et ON et.username=u.username "
-            "LEFT JOIN radusergroup g ON g.username=u.username "
+            "FROM fr_entity_type et "
+            "LEFT JOIN radcheck rc ON rc.username=et.username "
+            "LEFT JOIN radusergroup g ON g.username=et.username "
             f"{where_clause} "
-            "GROUP BY u.username, et.entity_type, et.description "
+            "GROUP BY et.username, et.entity_type, et.description "
             f"ORDER BY {sort_by} {sort_order.upper()} "
             "LIMIT %s OFFSET %s"
         )
         query_params = [
+            AUTH_TYPE_ATTRIBUTE,
+            AUTH_TYPE_ACCEPT,
             ENABLE_ON,
+            AUTH_TYPE_ATTRIBUTE,
+            AUTH_TYPE_REJECT,
+            ENABLE_OFF,
+            AUTH_TYPE_ATTRIBUTE,
+            AUTH_TYPE_DROP,
+            ENABLE_OFF,
             ENABLE_ON,
-            ENABLE_OFF,
-            ENABLE_OFF,
-            ENABLE_OFF,
             *params,
             page_size,
             offset,
@@ -458,15 +466,24 @@ class FreeRadiusMySQLClient:
                 raise FreeRadiusDBError("Password is required for users")
             statements.append(
                 (
-                    "INSERT INTO radcheck (username, attribute, op, value, enable) VALUES (%s, %s, %s, %s, %s)",
-                    (username, PASSWORD_ATTRIBUTE, DEFAULT_OP_EQUAL, password, enable),
+                    "INSERT INTO radcheck (username, attribute, op, value) VALUES (%s, %s, %s, %s)",
+                    (username, PASSWORD_ATTRIBUTE, DEFAULT_OP_EQUAL, password),
                 )
             )
+
+            if enable == ENABLE_OFF:
+                statements.append(
+                    (
+                        "INSERT INTO radcheck (username, attribute, op, value) VALUES (%s, %s, %s, %s)",
+                        (username, AUTH_TYPE_ATTRIBUTE, DEFAULT_OP_EQUAL, AUTH_TYPE_REJECT),
+                    )
+                )
         else:
+            auth_type_value = AUTH_TYPE_ACCEPT if enable == ENABLE_ON else AUTH_TYPE_DROP
             statements.append(
                 (
-                    "INSERT INTO radcheck (username, attribute, op, value, enable) VALUES (%s, %s, %s, %s, %s)",
-                    (username, AUTH_TYPE_ATTRIBUTE, DEFAULT_OP_EQUAL, AUTH_TYPE_ACCEPT, enable),
+                    "INSERT INTO radcheck (username, attribute, op, value) VALUES (%s, %s, %s, %s)",
+                    (username, AUTH_TYPE_ATTRIBUTE, DEFAULT_OP_EQUAL, auth_type_value),
                 )
             )
 
@@ -510,15 +527,41 @@ class FreeRadiusMySQLClient:
         statements: list[tuple[str, tuple[Any, ...]]] = [
             ("DELETE FROM radreply WHERE username=%s", (username,)),
             ("DELETE FROM radusergroup WHERE username=%s", (username,)),
-            ("UPDATE radcheck SET enable=%s WHERE username=%s", (enable, username)),
+            (
+                "DELETE FROM radcheck WHERE username=%s AND attribute=%s",
+                (username, AUTH_TYPE_ATTRIBUTE),
+            ),
             ("UPDATE fr_entity_type SET description=%s WHERE username=%s", (description, username)),
         ]
+
+        if entity_type == ENTITY_TYPE_USER:
+            if enable == ENABLE_OFF:
+                statements.append(
+                    (
+                        "INSERT INTO radcheck (username, attribute, op, value) VALUES (%s, %s, %s, %s)",
+                        (username, AUTH_TYPE_ATTRIBUTE, DEFAULT_OP_EQUAL, AUTH_TYPE_REJECT),
+                    )
+                )
+        else:
+            auth_type_value = AUTH_TYPE_ACCEPT if enable == ENABLE_ON else AUTH_TYPE_DROP
+            statements.append(
+                (
+                    "INSERT INTO radcheck (username, attribute, op, value) VALUES (%s, %s, %s, %s)",
+                    (username, AUTH_TYPE_ATTRIBUTE, DEFAULT_OP_EQUAL, auth_type_value),
+                )
+            )
 
         if entity_type == ENTITY_TYPE_USER and password:
             statements.append(
                 (
-                    "UPDATE radcheck SET value=%s WHERE username=%s AND attribute=%s",
-                    (password, username, PASSWORD_ATTRIBUTE),
+                    "DELETE FROM radcheck WHERE username=%s AND attribute=%s",
+                    (username, PASSWORD_ATTRIBUTE),
+                )
+            )
+            statements.append(
+                (
+                    "INSERT INTO radcheck (username, attribute, op, value) VALUES (%s, %s, %s, %s)",
+                    (username, PASSWORD_ATTRIBUTE, DEFAULT_OP_EQUAL, password),
                 )
             )
 
@@ -560,24 +603,138 @@ class FreeRadiusMySQLClient:
         )
 
     async def set_user_enable(self, username: str, enabled: bool) -> None:
-        """Set enable Y/N in radcheck.enable column."""
-        value = ENABLE_ON if enabled else ENABLE_OFF
+        """Set enable state: user uses Reject-or-delete, MAC uses Accept/Reject."""
         exists = await self.fetch_one("SELECT 1 AS ok FROM radcheck WHERE username=%s LIMIT 1", (username,))
         if not exists:
             raise FreeRadiusDBError("User not found in radcheck")
-        await self.execute("UPDATE radcheck SET enable=%s WHERE username=%s", (value, username))
+
+        entity_row = await self.fetch_one(
+            "SELECT entity_type FROM fr_entity_type WHERE username=%s LIMIT 1",
+            (username,),
+        )
+        if not entity_row:
+            raise FreeRadiusDBError("User type not found")
+
+        entity_type = str(entity_row["entity_type"]).strip().lower()
+
+        if entity_type == ENTITY_TYPE_USER:
+            if enabled:
+                await self.execute(
+                    "DELETE FROM radcheck WHERE username=%s AND attribute=%s",
+                    (username, AUTH_TYPE_ATTRIBUTE),
+                )
+                return
+
+            auth_type_row = await self.fetch_one(
+                "SELECT id FROM radcheck WHERE username=%s AND attribute=%s LIMIT 1",
+                (username, AUTH_TYPE_ATTRIBUTE),
+            )
+            if auth_type_row:
+                await self.execute(
+                    "UPDATE radcheck SET op=%s, value=%s WHERE id=%s",
+                    (DEFAULT_OP_EQUAL, AUTH_TYPE_REJECT, int(auth_type_row["id"])),
+                )
+                return
+
+            await self.execute(
+                "INSERT INTO radcheck (username, attribute, op, value) VALUES (%s, %s, %s, %s)",
+                (username, AUTH_TYPE_ATTRIBUTE, DEFAULT_OP_EQUAL, AUTH_TYPE_REJECT),
+            )
+            return
+
+        value = AUTH_TYPE_ACCEPT if enabled else AUTH_TYPE_DROP
+        auth_type_row = await self.fetch_one(
+            "SELECT id FROM radcheck WHERE username=%s AND attribute=%s LIMIT 1",
+            (username, AUTH_TYPE_ATTRIBUTE),
+        )
+        if auth_type_row:
+            await self.execute(
+                "UPDATE radcheck SET op=%s, value=%s WHERE id=%s",
+                (DEFAULT_OP_EQUAL, value, int(auth_type_row["id"])),
+            )
+            return
+
+        await self.execute(
+            "INSERT INTO radcheck (username, attribute, op, value) VALUES (%s, %s, %s, %s)",
+            (username, AUTH_TYPE_ATTRIBUTE, DEFAULT_OP_EQUAL, value),
+        )
 
     async def toggle_user_enable(self, username: str) -> str:
-        """Toggle radcheck.enable between Y/N and return new value."""
-        row = await self.fetch_one(
-            "SELECT COALESCE(MAX(CASE WHEN UPPER(enable)=%s THEN %s ELSE %s END), %s) AS enable "
-            "FROM radcheck WHERE username=%s",
-            (ENABLE_ON, ENABLE_ON, ENABLE_OFF, ENABLE_OFF, username),
+        """Toggle enable state and return Y/N compatibility value.
+
+        User:  disabled = Auth-Type := Reject row present; enable by deleting it.
+               enabled  = no Auth-Type row; disable by inserting Reject.
+        MAC:   disabled = Auth-Type := Drop; enable by updating to Accept.
+               enabled  = Auth-Type := Accept; disable by updating to Drop.
+        """
+        entity_row = await self.fetch_one(
+            "SELECT entity_type FROM fr_entity_type WHERE username=%s LIMIT 1",
+            (username,),
         )
-        current = str(row["enable"]).upper() if row and row.get("enable") is not None else ENABLE_OFF
-        new_value = ENABLE_OFF if current == ENABLE_ON else ENABLE_ON
-        await self.set_user_enable(username, new_value == ENABLE_ON)
-        return new_value
+        if not entity_row:
+            raise FreeRadiusDBError("User not found")
+
+        entity_type = str(entity_row["entity_type"]).strip().lower()
+
+        if entity_type == ENTITY_TYPE_USER:
+            reject_row = await self.fetch_one(
+                "SELECT id FROM radcheck "
+                "WHERE username=%s AND attribute=%s AND LOWER(TRIM(value))=LOWER(%s) LIMIT 1",
+                (username, AUTH_TYPE_ATTRIBUTE, AUTH_TYPE_REJECT),
+            )
+            if reject_row:
+                # Currently disabled → enable: remove Reject row
+                await self.execute(
+                    "DELETE FROM radcheck WHERE username=%s AND attribute=%s",
+                    (username, AUTH_TYPE_ATTRIBUTE),
+                )
+                return ENABLE_ON
+
+            # Currently enabled → disable: upsert Reject
+            auth_type_row = await self.fetch_one(
+                "SELECT id FROM radcheck WHERE username=%s AND attribute=%s LIMIT 1",
+                (username, AUTH_TYPE_ATTRIBUTE),
+            )
+            if auth_type_row:
+                await self.execute(
+                    "UPDATE radcheck SET op=%s, value=%s WHERE id=%s",
+                    (DEFAULT_OP_EQUAL, AUTH_TYPE_REJECT, int(auth_type_row["id"])),
+                )
+            else:
+                await self.execute(
+                    "INSERT INTO radcheck (username, attribute, op, value) VALUES (%s, %s, %s, %s)",
+                    (username, AUTH_TYPE_ATTRIBUTE, DEFAULT_OP_EQUAL, AUTH_TYPE_REJECT),
+                )
+            return ENABLE_OFF
+
+        # MAC path
+        auth_type_row = await self.fetch_one(
+            "SELECT id, LOWER(TRIM(value)) AS val "
+            "FROM radcheck WHERE username=%s AND attribute=%s LIMIT 1",
+            (username, AUTH_TYPE_ATTRIBUTE),
+        )
+        current_val = str(auth_type_row["val"]).strip().lower() if auth_type_row else AUTH_TYPE_ACCEPT.lower()
+
+        if current_val == AUTH_TYPE_DROP.lower():
+            # Currently disabled → enable: set Accept
+            await self.execute(
+                "UPDATE radcheck SET op=%s, value=%s WHERE id=%s",
+                (DEFAULT_OP_EQUAL, AUTH_TYPE_ACCEPT, int(auth_type_row["id"])),
+            )
+            return ENABLE_ON
+
+        # Currently enabled (Accept or anything else) → disable: upsert Drop
+        if auth_type_row:
+            await self.execute(
+                "UPDATE radcheck SET op=%s, value=%s WHERE id=%s",
+                (DEFAULT_OP_EQUAL, AUTH_TYPE_DROP, int(auth_type_row["id"])),
+            )
+        else:
+            await self.execute(
+                "INSERT INTO radcheck (username, attribute, op, value) VALUES (%s, %s, %s, %s)",
+                (username, AUTH_TYPE_ATTRIBUTE, DEFAULT_OP_EQUAL, AUTH_TYPE_DROP),
+            )
+        return ENABLE_OFF
 
     async def enable_user(self, username: str) -> None:
         """Enable entity."""

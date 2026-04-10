@@ -405,7 +405,7 @@ class FreeRadiusToggleUserView(FreeRadiusAPIBaseView):
     name = "api:ha_radius_access:users_toggle"
 
     async def post(self, request):
-        """Toggle enable status between Y/N in radcheck."""
+        """Toggle user Auth-Type between Accept/Reject and return Y/N compatibility."""
         try:
             payload = await request.json()
             username = _sanitize_username(payload.get("username"))
