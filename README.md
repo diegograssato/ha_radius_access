@@ -3,7 +3,7 @@
 # HA Radius Access (Home Assistant Custom Component)
 
 
-_Painel administrativo para Home Assistant para gerenciar usuários, grupos, NAS e MAC no FreeRADIUS com Mysql/Postgres/SQLite._
+_Painel administrativo para Home Assistant para gerenciar usuários, grupos, NAS e MAC no FreeRADIUS com MySQL e PostgreSQL._
 
 
 **Este componente configurará as seguintes plataformas.**
@@ -17,7 +17,7 @@ Platform | Description
 
 ## Recursos
 
-- Configuração de conexão via `config_flow` (host, porta, usuário, senha, database).
+- Configuração de conexão via `config_flow` com escolha do banco (`MySQL` ou `PostgreSQL`).
 - CRUD de grupos (`radgroupreply`) com múltiplos atributos e atributos repetidos.
 - CRUD de regras de grupo (`radgroupcheck`).
 - CRUD de NAS (`nas`) com `type` (`other`/`mikrotik`) e `ports` (`NULL`/`0`).
@@ -40,6 +40,7 @@ custom_components/ha_radius_access/
 ├── const.py
 ├── api.py
 ├── coordinator.py
+├── db_client.py
 ├── mysql_client.py
 ├── services.yaml
 ├── sensor.py
@@ -70,8 +71,10 @@ custom_components/ha_radius_access/
 
 ### SQL da tabela auxiliar obrigatória
 
+Exemplo para `MySQL`:
+
 ```sql
-CREATE TABLE fr_entity_type (
+CREATE TABLE userinfo (
 	username VARCHAR(64) NOT NULL PRIMARY KEY,
 	description VARCHAR(255) NULL,
 	entity_type ENUM('user', 'mac') NOT NULL,
@@ -82,13 +85,62 @@ CREATE TABLE fr_entity_type (
 
 Importante: a integração **não cria schema automaticamente**. Se faltar a tabela, o setup falha com erro explícito.
 
+Exemplo para `PostgreSQL`:
+ 
+```sql
+CREATE TYPE entity_enum AS ENUM ('user', 'mac');
+CREATE TABLE userinfo (
+    username VARCHAR(64) NOT NULL PRIMARY KEY,
+    description VARCHAR(255) NULL,
+    entity_type entity_enum NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+-- 1. Criar a função que atualiza o timestamp
+CREATE OR REPLACE FUNCTION update_timestamp_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- 2. Aplicar a Trigger à tabela
+CREATE TRIGGER update_userinfo_modtime
+    BEFORE UPDATE ON userinfo
+    FOR EACH ROW
+    EXECUTE FUNCTION update_timestamp_column();
+
+-- 3. Permissões de acesso as tabelas principais
+GRANT  SELECT, INSERT, UPDATE, DELETE on radgroupreply TO radius;
+
+GRANT SELECT, INSERT, UPDATE, DELETE on radgroupcheck TO radius;
+
+GRANT SELECT, INSERT, UPDATE, DELETE on userinfo TO radius;
+
+GRANT SELECT, INSERT, UPDATE, DELETE on radcheck TO radius;
+
+GRANT SELECT, INSERT, UPDATE, DELETE on radreply TO radius;
+
+GRANT SELECT, INSERT, UPDATE, DELETE on radusergroup TO radius;	
+
+GRANT SELECT, INSERT, UPDATE, DELETE on radacct TO radius;	
+```
+
 ## Instalação
 
 1. Copie `custom_components/ha_radius_access` para o diretório `config/custom_components/` do Home Assistant.
 2. Reinicie o Home Assistant.
 3. Vá em **Settings > Devices & Services > Add Integration**.
 4. Selecione **FreeRADIUS Manager**.
-5. Informe host, porta, usuário, senha e database do MySQL.
+5. Escolha o tipo de banco de dados: `MySQL` ou `PostgreSQL`.
+6. Informe host, porta, usuário, senha e database.
+
+Observações:
+
+- Porta padrão para `MySQL`: `3306`.
+- Porta padrão para `PostgreSQL`: `5432`.
+- A integração valida a conexão escolhida antes de concluir o setup.
 
 
 ## Painel Web
@@ -129,7 +181,7 @@ Páginas:
 
 ### `ha_radius_access.sync_users`
 
-Executa checagem de consistência entre `fr_entity_type` e `radcheck` e força refresh do coordinator.
+Executa checagem de consistência entre `userinfo` e `radcheck` e força refresh do coordinator.
 
 ### `ha_radius_access.disconnect_user`
 

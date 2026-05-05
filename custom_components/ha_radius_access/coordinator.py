@@ -42,4 +42,4 @@ class FreeRadiusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "active_count": len(sessions),
             }
         except FreeRadiusDBError as err:
-            raise UpdateFailed(f"MySQL refresh failed: {err}") from err
+            raise UpdateFailed(f"Database refresh failed: {err}") from err

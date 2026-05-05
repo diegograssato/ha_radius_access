@@ -56,7 +56,7 @@ class ConfigPage extends LitElement {
         <p>Required schema assumptions:</p>
         <ul>
           <li>FreeRADIUS default tables (radcheck, radreply, radgroupreply, radgroupcheck, radusergroup, radacct)</li>
-          <li>Auxiliary table <strong>fr_entity_type</strong> for user/mac type</li>
+          <li>Auxiliary table <strong>userinfo</strong> for user/mac type</li>
         </ul>
       </div>
     `;

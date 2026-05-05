@@ -10,16 +10,39 @@ from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNAME
 from homeassistant.core import callback
 
-from .const import CONF_DATABASE, CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL, DEFAULT_PORT, DOMAIN
+from .const import (
+    CONF_DATABASE,
+    CONF_DATABASE_TYPE,
+    CONF_POLL_INTERVAL,
+    DATABASE_TYPE_MYSQL,
+    DATABASE_TYPE_POSTGRESQL,
+    DEFAULT_DATABASE_TYPE,
+    DEFAULT_POLL_INTERVAL,
+    DEFAULT_PORT_MYSQL,
+    DEFAULT_PORT_POSTGRESQL,
+    DOMAIN,
+)
 
 
 def _schema_with_defaults(data: dict[str, Any] | None = None) -> vol.Schema:
     """Build flow schema with existing values as defaults."""
     data = data or {}
+    db_type = data.get(CONF_DATABASE_TYPE, DEFAULT_DATABASE_TYPE)
+    default_port = DEFAULT_PORT_MYSQL if db_type == DATABASE_TYPE_MYSQL else DEFAULT_PORT_POSTGRESQL
+
     return vol.Schema(
         {
+            vol.Required(
+                CONF_DATABASE_TYPE,
+                default=data.get(CONF_DATABASE_TYPE, DEFAULT_DATABASE_TYPE),
+            ): vol.In(
+                {
+                    DATABASE_TYPE_MYSQL: "MySQL",
+                    DATABASE_TYPE_POSTGRESQL: "PostgreSQL",
+                }
+            ),
             vol.Required(CONF_HOST, default=data.get(CONF_HOST, "localhost")): str,
-            vol.Required(CONF_PORT, default=data.get(CONF_PORT, DEFAULT_PORT)): int,
+            vol.Required(CONF_PORT, default=data.get(CONF_PORT, default_port)): int,
             vol.Required(CONF_USERNAME, default=data.get(CONF_USERNAME, "freeradius")): str,
             vol.Required(CONF_PASSWORD, default=data.get(CONF_PASSWORD, "")): str,
             vol.Required(CONF_DATABASE, default=data.get(CONF_DATABASE, "radius")): str,
@@ -33,17 +56,32 @@ def _schema_with_defaults(data: dict[str, Any] | None = None) -> vol.Schema:
 
 async def _test_connection(user_input: dict[str, Any]) -> None:
     """Validate DB connectivity before saving config entry."""
-    import aiomysql
+    db_type = user_input.get(CONF_DATABASE_TYPE, DEFAULT_DATABASE_TYPE)
 
-    conn = await aiomysql.connect(
+    if db_type == DATABASE_TYPE_MYSQL:
+        import aiomysql
+
+        conn = await aiomysql.connect(
+            host=user_input[CONF_HOST],
+            port=user_input[CONF_PORT],
+            user=user_input[CONF_USERNAME],
+            password=user_input[CONF_PASSWORD],
+            db=user_input[CONF_DATABASE],
+            charset="utf8mb4",
+        )
+        conn.close()
+        return
+
+    import asyncpg
+
+    conn = await asyncpg.connect(
         host=user_input[CONF_HOST],
         port=user_input[CONF_PORT],
         user=user_input[CONF_USERNAME],
         password=user_input[CONF_PASSWORD],
-        db=user_input[CONF_DATABASE],
-        charset="utf8mb4",
+        database=user_input[CONF_DATABASE],
     )
-    conn.close()
+    await conn.close()
 
 
 class FreeRadiusManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -60,7 +98,10 @@ class FreeRadiusManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             await self.async_set_unique_id(
-                f"{user_input[CONF_HOST]}:{user_input[CONF_PORT]}:{user_input[CONF_DATABASE]}"
+                (
+                    f"{user_input[CONF_DATABASE_TYPE]}:"
+                    f"{user_input[CONF_HOST]}:{user_input[CONF_PORT]}:{user_input[CONF_DATABASE]}"
+                )
             )
             self._abort_if_unique_id_configured()
             try:
@@ -68,14 +109,15 @@ class FreeRadiusManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except Exception:  # noqa: BLE001
                 errors["base"] = "cannot_connect"
             else:
+                db_label = "PostgreSQL" if user_input[CONF_DATABASE_TYPE] == DATABASE_TYPE_POSTGRESQL else "MySQL"
                 return self.async_create_entry(
-                    title=f"FreeRADIUS ({user_input[CONF_DATABASE]})",
+                    title=f"FreeRADIUS {db_label} ({user_input[CONF_DATABASE]})",
                     data=user_input,
                 )
 
         return self.async_show_form(
             step_id="user",
-            data_schema=_schema_with_defaults(),
+            data_schema=_schema_with_defaults(user_input),
             errors=errors,
         )
 

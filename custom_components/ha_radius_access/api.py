@@ -334,11 +334,19 @@ class FreeRadiusUsersView(FreeRadiusAPIBaseView):
             if enable not in {ENABLE_ON, ENABLE_OFF}:
                 raise vol.Invalid("enable must be Y or N")
 
-            groups = payload.get("groups", [])
+            groups = payload.get("groups")
+            if groups is None:
+                groups = []
+            if not isinstance(groups, list):
+                raise vol.Invalid("groups must be a list")
             clean_groups = [_sanitize_text(item, "group", 64) for item in groups]
             description = _sanitize_optional_text(payload.get("description"), "description", 255)
 
-            reply_attributes = payload.get("reply_attributes", [])
+            reply_attributes = payload.get("reply_attributes")
+            if reply_attributes is None:
+                reply_attributes = []
+            if not isinstance(reply_attributes, list):
+                raise vol.Invalid("reply_attributes must be a list")
             clean_reply = [
                 {
                     "attribute": _sanitize_text(item.get("attribute"), "attribute", 64),
@@ -378,11 +386,19 @@ class FreeRadiusUsersView(FreeRadiusAPIBaseView):
             else:
                 password = None
 
-            groups = payload.get("groups", [])
+            groups = payload.get("groups")
+            if groups is None:
+                groups = []
+            if not isinstance(groups, list):
+                raise vol.Invalid("groups must be a list")
             clean_groups = [_sanitize_text(item, "group", 64) for item in groups]
             description = _sanitize_optional_text(payload.get("description"), "description", 255)
 
-            reply_attributes = payload.get("reply_attributes", [])
+            reply_attributes = payload.get("reply_attributes")
+            if reply_attributes is None:
+                reply_attributes = []
+            if not isinstance(reply_attributes, list):
+                raise vol.Invalid("reply_attributes must be a list")
             clean_reply = [
                 {
                     "attribute": _sanitize_text(item.get("attribute"), "attribute", 64),

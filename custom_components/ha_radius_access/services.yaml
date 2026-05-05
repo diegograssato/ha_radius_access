@@ -1,6 +1,6 @@
 sync_users:
   name: Sync users
-  description: Runs a consistency check between fr_entity_type and radcheck, then refreshes coordinator cache.
+  description: Runs a consistency check between userinfo and radcheck, then refreshes coordinator cache.
 
 disconnect_user:
   name: Disconnect user

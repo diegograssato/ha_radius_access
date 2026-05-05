@@ -1523,7 +1523,7 @@ class HaRadiusAccessPanel extends HTMLElement {
         }
       </style>
       <div class="card">
-        <h2>System: HA Radius Access</h2>
+        <h2>HA Radius Access</h2>
         <p class="subtitle">Interface de gerenciamento Freeradius, para contrele de usuário e devices.</p>
         <div class="tabs">
           <button class="tab ${this._state.tab === "users" ? "active" : ""}" data-tab="users">Usuários & MAC</button>

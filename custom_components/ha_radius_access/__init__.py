@@ -33,7 +33,7 @@ from .const import (
 
 if TYPE_CHECKING:
     from .coordinator import FreeRadiusCoordinator
-    from .mysql_client import DBConfig, FreeRadiusDBError, FreeRadiusMySQLClient
+    from .db_client import DBConfig, FreeRadiusDBClient, FreeRadiusDBError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -93,12 +93,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up FreeRADIUS Manager from config entry."""
     from .api import register_views
     from .coordinator import FreeRadiusCoordinator
-    from .mysql_client import DBConfig, FreeRadiusDBError, FreeRadiusMySQLClient
+    from .const import CONF_DATABASE_TYPE, DATABASE_TYPE_MYSQL, DEFAULT_DATABASE_TYPE
+    from .db_client import (
+        DBConfig,
+        FreeRadiusDBError,
+        FreeRadiusMySQLClient,
+        FreeRadiusPostgreSQLClient,
+    )
 
     hass.data.setdefault(DOMAIN, {})
 
     merged = {**entry.data, **entry.options}
+    db_type = merged.get(CONF_DATABASE_TYPE, DEFAULT_DATABASE_TYPE)
     config = DBConfig(
+        db_type=db_type,
         host=merged[CONF_HOST],
         port=merged[CONF_PORT],
         username=merged[CONF_USERNAME],
@@ -106,7 +114,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         database=merged[CONF_DATABASE],
     )
 
-    client = FreeRadiusMySQLClient(config)
+    if db_type == DATABASE_TYPE_MYSQL:
+        client = FreeRadiusMySQLClient(config)
+    else:
+        client = FreeRadiusPostgreSQLClient(config)
     try:
         await client.connect()
     except FreeRadiusDBError as err:
@@ -133,7 +144,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         for entry_data in hass.data[DOMAIN].values():
             if not isinstance(entry_data, dict) or DATA_CLIENT not in entry_data:
                 continue
-            c: FreeRadiusMySQLClient = entry_data[DATA_CLIENT]
+            c: FreeRadiusDBClient = entry_data[DATA_CLIENT]
             d: FreeRadiusCoordinator = entry_data[DATA_COORDINATOR]
             result = await c.sync_users()
             await d.async_request_refresh()
@@ -146,7 +157,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         for entry_data in hass.data[DOMAIN].values():
             if not isinstance(entry_data, dict) or DATA_CLIENT not in entry_data:
                 continue
-            c: FreeRadiusMySQLClient = entry_data[DATA_CLIENT]
+            c: FreeRadiusDBClient = entry_data[DATA_CLIENT]
             d: FreeRadiusCoordinator = entry_data[DATA_COORDINATOR]
             total_affected += await c.disconnect_user(username)
             await d.async_request_refresh()
@@ -174,7 +185,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     data = hass.data[DOMAIN].pop(entry.entry_id, None)
     if data:
-        client: FreeRadiusMySQLClient = data[DATA_CLIENT]
+        client: FreeRadiusDBClient = data[DATA_CLIENT]
         await client.close()
 
     return unload_ok
