@@ -1,4 +1,4 @@
-<img align="left" width="90" height="90" src="icon.png" alt="App icon">
+<img src="https://raw.githubusercontent.com/diegograssato/ha_radius_access/refs/heads/main/icon.png" align="left" width="90" height="90"  alt="Radius logo">
 
 # HA Radius Access (Home Assistant Custom Component)
 
@@ -6,11 +6,12 @@
 _Painel administrativo para Home Assistant para gerenciar usuários, grupos, NAS e MAC no FreeRADIUS com Mysql/Postgres/SQLite._
 
 
-**This component will set up the following platforms.**
+**Este componente configurará as seguintes plataformas.**
 
 Platform | Description
 -- | --
 `ha_radius_access` | Painel administrativo para Home Assistant.
+[ha_radius_server] | Home Assistant Addon: FreeRADIUS.
 
 
 
@@ -186,3 +187,6 @@ data:
 - `WISPr-Bandwidth-Max-Up`: taxa máxima (MIR) de upload fornecida ao cliente.
 - `WISPr-Bandwidth-Max-Down`: taxa máxima (MIR) de download fornecida ao cliente.
 - `WISPr-Session-Terminate-Time`: horário em que o usuário deve ser desconectado, no formato `YYYY-MM-DDThh:mm:ssTZD`, onde `TZD` pode ser `+hh:mm`, `+hhmm`, `-hh:mm` ou `-hhmm`.
+
+
+[ha_radius_server]: https://github.com/diegograssato/ha_radius_server
