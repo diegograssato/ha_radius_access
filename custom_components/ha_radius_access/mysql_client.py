@@ -395,6 +395,59 @@ class FreeRadiusMySQLClient:
             "total": total,
         }
 
+    async def get_nas(self) -> list[dict[str, Any]]:
+        """Return NAS rows from nas table."""
+        sql = (
+            "SELECT nasname, shortname, type, ports, secret, server, community, "
+            "COALESCE(description, '') AS description "
+            "FROM nas ORDER BY nasname"
+        )
+        return await self.fetch_all(sql)
+
+    async def create_nas(
+        self,
+        nasname: str,
+        shortname: str,
+        nas_type: str,
+        ports: int | None,
+        secret: str,
+        server: str | None,
+        community: str | None,
+        description: str | None,
+    ) -> None:
+        """Insert one NAS row."""
+        await self.execute(
+            "INSERT INTO nas "
+            "(nasname, shortname, type, ports, secret, server, community, description) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+            (nasname, shortname, nas_type, ports, secret, server, community, description),
+        )
+
+    async def update_nas(
+        self,
+        nasname: str,
+        shortname: str,
+        nas_type: str,
+        ports: int | None,
+        secret: str,
+        server: str | None,
+        community: str | None,
+        description: str | None,
+    ) -> None:
+        """Update NAS row identified by nasname."""
+        affected = await self.execute(
+            "UPDATE nas "
+            "SET shortname=%s, type=%s, ports=%s, secret=%s, server=%s, community=%s, description=%s "
+            "WHERE nasname=%s",
+            (shortname, nas_type, ports, secret, server, community, description, nasname),
+        )
+        if affected == 0:
+            raise FreeRadiusDBError("NAS not found")
+
+    async def delete_nas(self, nasname: str) -> None:
+        """Delete NAS row by nasname."""
+        await self.execute("DELETE FROM nas WHERE nasname=%s", (nasname,))
+
     async def _set_entity_type(self, username: str, entity_type: str, description: str | None = None) -> None:
         sql = (
             "INSERT INTO fr_entity_type (username, entity_type, description) VALUES (%s, %s, %s) "

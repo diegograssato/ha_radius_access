@@ -1,3 +1,48 @@
+const ATTRIBUTE_DESCRIPTIONS = {
+  "Session-Timeout": "overrides session-timeout in the default configuration",
+  "Idle-Timeout": "overrides idle-timeout in the default configuration",
+  "Acct-Interim-Interval": "interim-update for RADIUS client. PPP: if 0 uses the one specified in RADIUS client; HotSpot: only respected if radius-interim-update=received in HotSpot server profile",
+  "MS-Primary-DNS-Server": "Primary DNS server",
+  "MS-Secondary-DNS-Server": "Secondary DNS server",
+  "Tunnel-Type": "Value should be vlan (13) - To dynamically assign a VLAN to a user on a MikroTik switch or AP, the RADIUS server must return the following Vendor-Specific Attributes (VSAs)",
+  "Tunnel-Medium-Type": "Value should be 802 (6) - To dynamically assign a VLAN to a user on a MikroTik switch or AP, the RADIUS server must return the following Vendor-Specific Attributes (VSAs)",
+  "Tunnel-Private-Group-Id": "Value is the VLAN ID (e.g., 10, 20) - To dynamically assign a VLAN to a user on a MikroTik switch or AP, the RADIUS server must return the following Vendor-Specific Attributes (VSAs)",
+  "Framed-Route": "routes to add on the server. Format is specified in RFC 2865 (Ch. 5.22), can be specified as many times as needed",
+  "Framed-Pool": "IP pool name (on the router) from which to get IP address for the client. If Framed-IP-Address is specified, this attribute is ignored",
+  "Framed-IP-Address": "IP address of HotSpot client after Universal Client translation",
+  "Filter-Id": "firewall filter chain name. Used to make a dynamic firewall rule. Suffix .in/.out applies incoming/outgoing only. Multiple values accepted, but only the last incoming and last outgoing are used.",
+  "Ascend-Data-Rate": "tx/rx data rate limitation. If multiple attributes are provided, first limits tx and second rx. 0 means unlimited. Ignored if Rate-Limit attribute is present",
+  "Ascend-Xmit-Rate": "tx data rate limitation. Can be used with Ascend-Data-Rate for rx rate. 0 means unlimited. Ignored if Rate-Limit attribute is present",
+  "MS-CHAP2-Success": "auth response if MS-CHAPv2 was used (PPPs only)",
+  "MS-MPPE-Send-Key": "encryption key for encrypted PPPs when MS-CHAPv2 is used (PPPs only)",
+  "MS-MPPE-Recv-Key": "encryption key for encrypted PPPs when MS-CHAPv2 is used (PPPs only)",
+  "Ascend-Client-Gateway": "client gateway for DHCP-pool HotSpot login method (HotSpot only)",
+  "MS-MPPE-Encryption-Policy": "require-encryption property (PPPs only)",
+  "MS-MPPE-Encryption-Types": "use-encryption property, non-zero means encryption enabled (PPPs only)",
+  "Mikrotik-Mark-Id": "firewall mangle chain name (HotSpot only). Can use .in/.out suffix. Multiple values accepted, only the last incoming and outgoing are used.",
+  "Mikrotik-Recv-Limit": "total receive limit in bytes for the client",
+  "Mikrotik-Recv-Limit-Gigawords": "4G (2^32) bytes blocks of total receive limit (bits 32..63)",
+  "Mikrotik-Xmit-Limit": "total transmit limit in bytes for the client",
+  "Mikrotik-Xmit-Limit-Gigawords": "4G (2^32) bytes blocks of total transmit limit (bits 32..63)",
+  "Mikrotik-Wireless-Forward": "do not forward client's frames back to wireless infrastructure if set to 0 (Wireless only)",
+  "Mikrotik-Wireless-Skip-Dot1x": "disable 802.1x authentication for the wireless client if non-zero (Wireless only)",
+  "Mikrotik-Wireless-Enc-Algo": "WEP algorithm: 0 no encryption, 1 40-bit WEP, 2 104-bit WEP (Wireless only)",
+  "Mikrotik-Wireless-Enc-Key": "WEP encryption key for the client (Wireless only)",
+  "Mikrotik-Wireless-VLANID": "VLAN ID for the client (Wireless only)",
+  "Mikrotik-Wireless-VLANID-type": "VLAN ID type for the client. 0 = 802.1q, 1 = 802.1ad (Wireless only)",
+  "Mikrotik-Switching-Filter": "allows creating dynamic switch rules when authenticating dot1x clients",
+  "Mikrotik-Rate-Limit": "Datarate limitation format: rx-rate[/tx-rate] [rx-burst-rate[/tx-burst-rate] [rx-burst-threshold[/tx-burst-threshold] [rx-burst-time[/tx-burst-time] [priority] [rx-rate-min[/tx-rate-min]]]]",
+  "Mikrotik-Group": "Router local user group; HotSpot default profile; PPP default profile",
+  "Mikrotik-Advertise-URL": "URL for client advertisements. Can be repeated for round-robin URLs.",
+  "Mikrotik-Advertise-Interval": "Interval between advertisements. Can be repeated and consumed as a list.",
+  "WISPr-Redirection-URL": "URL to redirect clients after successful login",
+  "WISPr-Bandwidth-Min-Up": "minimal datarate (CIR) for client upload",
+  "WISPr-Bandwidth-Min-Down": "minimal datarate (CIR) for client download",
+  "WISPr-Bandwidth-Max-Up": "maximal datarate (MIR) for client upload",
+  "WISPr-Bandwidth-Max-Down": "maximal datarate (MIR) for client download",
+  "WISPr-Session-Terminate-Time": "time when user should be disconnected in YYYY-MM-DDThh:mm:ssTZD format",
+};
+
 class HaRadiusAccessPanel extends HTMLElement {
   constructor() {
     super();
@@ -14,8 +59,10 @@ class HaRadiusAccessPanel extends HTMLElement {
       tab: "users",
       usersView: "list",
       groupsView: "list",
+      nasView: "list",
       userFormType: "user",
       groupsRaw: [],
+      nasRows: [],
       groupNames: [],
       users: [],
       totalUsers: 0,
@@ -40,6 +87,19 @@ class HaRadiusAccessPanel extends HTMLElement {
       userDetails: null,
       userReplyAttributes: [],
       editingReplyIndex: null,
+      editingNasName: null,
+      nasPage: 1,
+      nasPageSize: 25,
+      nasSearchDraft: "",
+      nasSearchTerm: "",
+      nasForm: {
+        nasname: "",
+        shortname: "",
+        type: "other",
+        ports: "NULL",
+        secret: "",
+        description: "",
+      },
     };
   }
 
@@ -126,7 +186,7 @@ class HaRadiusAccessPanel extends HTMLElement {
       if (target.id === "users-page-size") {
         const select = /** @type {HTMLSelectElement} */ (target);
         const value = Number(select.value);
-        if ([10, 25, 50].includes(value)) {
+        if ([10, 25, 50, 100, 200, 500].includes(value)) {
           this._state.usersPageSize = value;
           this._state.usersPage = 1;
           await this._loadUsers();
@@ -136,9 +196,19 @@ class HaRadiusAccessPanel extends HTMLElement {
       if (target.id === "groups-page-size") {
         const select = /** @type {HTMLSelectElement} */ (target);
         const value = Number(select.value);
-        if ([10, 25, 50].includes(value)) {
+        if ([10, 25, 50, 100, 200, 500].includes(value)) {
           this._state.groupsPageSize = value;
           this._state.groupsPage = 1;
+          this._renderContent();
+        }
+      }
+
+      if (target.id === "nas-page-size") {
+        const select = /** @type {HTMLSelectElement} */ (target);
+        const value = Number(select.value);
+        if ([10, 25, 50, 100, 200, 500].includes(value)) {
+          this._state.nasPageSize = value;
+          this._state.nasPage = 1;
           this._renderContent();
         }
       }
@@ -186,6 +256,27 @@ class HaRadiusAccessPanel extends HTMLElement {
     this._setMultiSelectValues("users-groups", draft.groups || []);
     this._setValue("users-reply-attribute", draft.replyAttribute || "");
     this._setValue("users-reply-value", draft.replyValue || "");
+  }
+
+  _attributeOptions() {
+    return Object.keys(ATTRIBUTE_DESCRIPTIONS).sort((a, b) => a.localeCompare(b));
+  }
+
+  _attributeDescription(attribute) {
+    return ATTRIBUTE_DESCRIPTIONS[attribute] || "Sem descrição disponível.";
+  }
+
+  _uniqueAttributeList(items) {
+    return Array.from(new Set((items || []).filter(Boolean)));
+  }
+
+  _showAttributeHelp(selectId) {
+    const attribute = this._value(selectId);
+    if (!attribute) {
+      this._setStatus("Selecione um atributo para ver a descrição.", true);
+      return;
+    }
+    window.alert(`${attribute}\n\n${this._attributeDescription(attribute)}`);
   }
 
   async _handleAction(action, target) {
@@ -328,6 +419,56 @@ class HaRadiusAccessPanel extends HTMLElement {
       if (action === "service-disconnect") {
         const username = this._value("disconnect-username");
         await this._callService("disconnect_user", { username });
+      }
+      if (action === "nas-new") {
+        this._openNewNasForm();
+      }
+      if (action === "nas-back") {
+        this._goToNasList();
+      }
+      if (action === "nas-edit") {
+        this._editNas(target.getAttribute("data-nasname"));
+      }
+      if (action === "nas-delete") {
+        await this._deleteNas(target.getAttribute("data-nasname"));
+      }
+      if (action === "nas-save") {
+        await this._saveNas();
+      }
+      if (action === "groups-attr-help") {
+        this._showAttributeHelp("groups-attr-attribute");
+      }
+      if (action === "users-reply-help") {
+        this._showAttributeHelp("users-reply-attribute");
+      }
+      if (action === "nas-search") {
+        this._state.nasSearchDraft = this._value("nas-search");
+        this._state.nasSearchTerm = this._state.nasSearchDraft;
+        this._state.nasPage = 1;
+        this._renderContent();
+      }
+      if (action === "nas-clear-search") {
+        this._state.nasSearchDraft = "";
+        this._state.nasSearchTerm = "";
+        this._state.nasPage = 1;
+        this._renderContent();
+      }
+      if (action === "nas-page-prev") {
+        if (this._state.nasPage > 1) {
+          this._state.nasPage -= 1;
+          this._renderContent();
+        }
+      }
+      if (action === "nas-page-next") {
+        const filterTerm = (this._state.nasSearchTerm || "").toLowerCase();
+        const total = (this._state.nasRows || []).filter((x) =>
+          !filterTerm || x.nasname.toLowerCase().includes(filterTerm) || (x.shortname || "").toLowerCase().includes(filterTerm)
+        ).length;
+        const totalPages = Math.max(1, Math.ceil(total / this._state.nasPageSize));
+        if (this._state.nasPage < totalPages) {
+          this._state.nasPage += 1;
+          this._renderContent();
+        }
       }
     } catch (err) {
       this._setStatus(`Erro: ${err.message}`, true);
@@ -485,8 +626,13 @@ class HaRadiusAccessPanel extends HTMLElement {
   }
 
   async _loadAll() {
-    await Promise.all([this._loadGroups(), this._loadGroupNames(), this._loadUsers()]);
+    await Promise.all([this._loadGroups(), this._loadGroupNames(), this._loadUsers(), this._loadNas()]);
     this._setStatus("Painel carregado.", false);
+  }
+
+  async _loadNas() {
+    this._state.nasRows = await this._api("/api/ha_radius_access/nas");
+    this._renderContent();
   }
 
   async _loadGroups() {
@@ -573,6 +719,95 @@ class HaRadiusAccessPanel extends HTMLElement {
 
   async _refreshAfterGroupMutation() {
     await Promise.all([this._loadGroups(), this._loadGroupNames(), this._loadUsers()]);
+  }
+
+  async _refreshAfterNasMutation() {
+    await this._loadNas();
+  }
+
+  _resetNasFormState() {
+    this._state.editingNasName = null;
+    this._state.nasForm = {
+      nasname: "",
+      shortname: "",
+      type: "other",
+      ports: "NULL",
+      secret: "",
+      description: "",
+    };
+  }
+
+  _openNewNasForm() {
+    this._resetNasFormState();
+    this._state.nasView = "edit";
+    this._renderContent();
+  }
+
+  _goToNasList() {
+    this._state.nasView = "list";
+    this._renderContent();
+  }
+
+  _editNas(nasname) {
+    const row = (this._state.nasRows || []).find((x) => x.nasname === nasname);
+    if (!row) {
+      return;
+    }
+    this._state.editingNasName = nasname;
+    this._state.nasForm = {
+      nasname: row.nasname || "",
+      shortname: row.shortname || "",
+      type: row.type || "other",
+      ports: row.ports == null ? "NULL" : String(row.ports),
+      secret: row.secret || "",
+      description: row.description || "",
+    };
+    this._state.nasView = "edit";
+    this._renderContent();
+  }
+
+  async _saveNas() {
+    const payload = {
+      nasname: this._state.editingNasName || this._value("nas-nasname"),
+      shortname: this._value("nas-shortname"),
+      type: this._value("nas-type") || "other",
+      ports: this._value("nas-ports") === "0" ? 0 : null,
+      secret: this._value("nas-secret"),
+      server: null,
+      community: null,
+      description: this._value("nas-description") || null,
+    };
+
+    if (!payload.nasname) {
+      throw new Error("Informe NAS Name");
+    }
+    if (!payload.shortname) {
+      throw new Error("Informe Short Name");
+    }
+    if (!payload.secret) {
+      throw new Error("Informe Secret");
+    }
+
+    if (this._state.editingNasName) {
+      await this._api("/api/ha_radius_access/nas", "PUT", payload);
+      this._setStatus(`NAS ${payload.nasname} atualizado.`, false);
+    } else {
+      await this._api("/api/ha_radius_access/nas", "POST", payload);
+      this._setStatus(`NAS ${payload.nasname} criado.`, false);
+    }
+
+    this._state.nasView = "list";
+    this._resetNasFormState();
+    await this._refreshAfterNasMutation();
+  }
+
+  async _deleteNas(nasname) {
+    if (!nasname || !window.confirm(`Excluir NAS ${nasname}?`)) {
+      return;
+    }
+    await this._api(`/api/ha_radius_access/nas?nasname=${encodeURIComponent(nasname)}`, "DELETE");
+    this._setStatus(`NAS ${nasname} excluido.`, false);
+    await this._refreshAfterNasMutation();
   }
 
   async _saveGroup() {
@@ -1293,6 +1528,7 @@ class HaRadiusAccessPanel extends HTMLElement {
         <div class="tabs">
           <button class="tab ${this._state.tab === "users" ? "active" : ""}" data-tab="users">Usuários & MAC</button>
           <button class="tab ${this._state.tab === "groups" ? "active" : ""}" data-tab="groups">Grupos de acesso</button>
+          <button class="tab ${this._state.tab === "nas" ? "active" : ""}" data-tab="nas">NAS</button>
           <button class="tab ${this._state.tab === "config" ? "active" : ""}" data-tab="config">Configurações</button>
         </div>
         <div id="status" class="status ok">${this._state.status || "Pronto."}</div>
@@ -1314,6 +1550,10 @@ class HaRadiusAccessPanel extends HTMLElement {
     }
     if (this._state.tab === "groups") {
       content.innerHTML = this._renderGroups();
+      return;
+    }
+    if (this._state.tab === "nas") {
+      content.innerHTML = this._renderNas();
       return;
     }
     content.innerHTML = this._renderUsers();
@@ -1401,6 +1641,9 @@ class HaRadiusAccessPanel extends HTMLElement {
                 <option value="10" ${this._state.groupsPageSize === 10 ? "selected" : ""}>10</option>
                 <option value="25" ${this._state.groupsPageSize === 25 ? "selected" : ""}>25</option>
                 <option value="50" ${this._state.groupsPageSize === 50 ? "selected" : ""}>50</option>
+                <option value="100" ${this._state.groupsPageSize === 100 ? "selected" : ""}>100</option>
+                <option value="200" ${this._state.groupsPageSize === 200 ? "selected" : ""}>200</option>
+                <option value="500" ${this._state.groupsPageSize === 500 ? "selected" : ""}>500</option>
               </select>
             </div>
           </div>
@@ -1420,21 +1663,10 @@ class HaRadiusAccessPanel extends HTMLElement {
   }
 
   _renderGroupsEdit() {
-    const attributeOptions = [
-      "Framed-IP-Address",
-      "Framed-Pool",
-      "Framed-Route",
-      "Mikrotik-Rate-Limit",
-      "Mikrotik-Group",
-      "Session-Timeout",
-      "Idle-Timeout",
-      "Acct-Interim-Interval",
-      "MS-Primary-DNS-Server",
-      "MS-Secondary-DNS-Server",
-      "Tunnel-Type",
-      "Tunnel-Medium-Type",
-      "Tunnel-Private-Group-Id",
-    ];
+    const attributeOptions = this._attributeOptions();
+    const attributeHelpRows = this._uniqueAttributeList((this._state.groupAttributes || []).map((x) => x.attribute))
+      .map((attribute) => `<li><strong>${attribute}:</strong> ${this._attributeDescription(attribute)}</li>`)
+      .join("");
 
     const attrRows = (this._state.groupAttributes || [])
       .map(
@@ -1469,7 +1701,7 @@ class HaRadiusAccessPanel extends HTMLElement {
               <label>Atributo</label>
               <select id="groups-attr-attribute">
                 <option value="">Selecione...</option>
-                ${attributeOptions.map((attr) => `<option value="${attr}">${attr}</option>`).join("")}
+                ${attributeOptions.map((attr) => `<option value="${attr}" title="${this._attributeDescription(attr)}">${attr}</option>`).join("")}
               </select>
             </div>
             <div class="op-operator">:=</div>
@@ -1479,8 +1711,18 @@ class HaRadiusAccessPanel extends HTMLElement {
             </div>
           </div>
           <div class="row">
+            <button class="action" data-action="groups-attr-help">Ajuda do atributo (popup)</button>
             <button class="action primary" data-action="groups-attr-add">${this._state.editingGroupAttrIndex != null ? "Salvar Atributo" : "Adicionar Atributo"}</button>
           </div>
+
+          ${attributeHelpRows ? `
+            <div class="row">
+              <div style="width: 100%; border: 1px solid #59657c; border-radius: 3px; background: #1c2639; padding: 8px 10px;">
+                <strong>Descrição dos atributos selecionados</strong>
+                <ul style="margin: 8px 0 0; padding-left: 20px;">${attributeHelpRows}</ul>
+              </div>
+            </div>
+          ` : ""}
 
           <table>
             <thead><tr><th>Atributo</th><th>Op</th><th>Valor</th><th>Acoes</th></tr></thead>
@@ -1489,6 +1731,154 @@ class HaRadiusAccessPanel extends HTMLElement {
 
           <div class="row">
             <button class="action primary" data-action="groups-save">Salvar Grupo</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  _renderNas() {
+    if (this._state.nasView === "edit") {
+      return this._renderNasEdit();
+    }
+
+    const filterTerm = (this._state.nasSearchTerm || "").toLowerCase();
+    const allNas = (this._state.nasRows || []).filter((x) =>
+      !filterTerm ||
+      (x.nasname || "").toLowerCase().includes(filterTerm) ||
+      (x.shortname || "").toLowerCase().includes(filterTerm)
+    );
+    const total = allNas.length;
+    const totalPages = Math.max(1, Math.ceil(total / this._state.nasPageSize));
+    const currentPage = Math.min(Math.max(1, this._state.nasPage), totalPages);
+    const start = (currentPage - 1) * this._state.nasPageSize;
+    const pageNas = allNas.slice(start, start + this._state.nasPageSize);
+
+    const rows = pageNas
+      .map(
+        (item) => `
+          <tr>
+            <td>${item.nasname || "-"}</td>
+            <td>${item.shortname || "-"}</td>
+            <td>${item.type || "-"}</td>
+            <td>${item.ports == null ? "NULL" : item.ports}</td>
+            <td>${item.secret || "-"}</td>
+            <td>${item.description || "-"}</td>
+            <td class="actions-col">
+              <button class="action icon-action" title="Editar" data-action="nas-edit" data-nasname="${item.nasname}"><ha-icon icon="mdi:pencil"></ha-icon><span class="sr-only">Editar</span></button>
+              <button class="action icon-action danger" title="Excluir" data-action="nas-delete" data-nasname="${item.nasname}"><ha-icon icon="mdi:trash-can-outline"></ha-icon><span class="sr-only">Excluir</span></button>
+            </td>
+          </tr>
+        `
+      )
+      .join("");
+
+    return `
+      <div class="section">
+        <div class="panel">
+          <h3>Lista de NAS</h3>
+          <div class="row">
+            <button class="action primary" data-action="nas-new">Cadastrar NAS</button>
+          </div>
+
+          <div class="row">
+            <div style="flex: 1 1 260px;">
+              <label>Filtro por nasname ou shortname</label>
+              <input id="nas-search" value="${this._state.nasSearchDraft || ""}" placeholder="Digite para buscar" />
+            </div>
+            <div style="align-self: end; display: flex; gap: 8px;">
+              <button class="action" data-action="nas-search">Buscar</button>
+              <button class="action" data-action="nas-clear-search">Limpar</button>
+            </div>
+          </div>
+
+          <div class="row meta">
+            <p>Total: ${total}</p>
+            <div>
+              <label style="margin-right: 8px;">Itens por pagina</label>
+              <select id="nas-page-size">
+                <option value="10" ${this._state.nasPageSize === 10 ? "selected" : ""}>10</option>
+                <option value="25" ${this._state.nasPageSize === 25 ? "selected" : ""}>25</option>
+                <option value="50" ${this._state.nasPageSize === 50 ? "selected" : ""}>50</option>
+                <option value="100" ${this._state.nasPageSize === 100 ? "selected" : ""}>100</option>
+                <option value="200" ${this._state.nasPageSize === 200 ? "selected" : ""}>200</option>
+                <option value="500" ${this._state.nasPageSize === 500 ? "selected" : ""}>500</option>
+              </select>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>nasname</th>
+                <th>shortname</th>
+                <th>type</th>
+                <th>ports</th>
+                <th>secret</th>
+                <th>description</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody>${rows || `<tr><td colspan="7">Sem NAS</td></tr>`}</tbody>
+          </table>
+
+          <div class="row" style="justify-content: space-between; margin-top: 12px;">
+            <button class="action" data-action="nas-page-prev" ${currentPage <= 1 ? "disabled" : ""}>Anterior</button>
+            <span>Pagina ${currentPage} de ${totalPages}</span>
+            <button class="action" data-action="nas-page-next" ${currentPage >= totalPages ? "disabled" : ""}>Proxima</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  _renderNasEdit() {
+    const form = this._state.nasForm || {};
+    return `
+      <div class="section">
+        <div class="panel">
+          <h3>${this._state.editingNasName ? `Editar NAS: ${this._state.editingNasName}` : "Cadastro de NAS"}</h3>
+          <div class="row">
+            <button class="action" data-action="nas-back">Voltar</button>
+          </div>
+
+          <div class="grid">
+            <div>
+              <label>nasname</label>
+              <input id="nas-nasname" value="${form.nasname || ""}" placeholder="10.0.0.2" ${this._state.editingNasName ? "disabled" : ""} />
+            </div>
+            <div>
+              <label>shortname</label>
+              <input id="nas-shortname" value="${form.shortname || ""}" placeholder="UBNT-AP-A" />
+            </div>
+            <div>
+              <label>type</label>
+              <select id="nas-type">
+                <option value="other" ${(form.type || "other") === "other" ? "selected" : ""}>other</option>
+                <option value="mikrotik" ${(form.type || "other") === "mikrotik" ? "selected" : ""}>mikrotik</option>
+              </select>
+            </div>
+            <div>
+              <label>ports</label>
+              <select id="nas-ports">
+                <option value="NULL" ${(form.ports || "NULL") === "NULL" ? "selected" : ""}>NULL</option>
+                <option value="0" ${(form.ports || "NULL") === "0" ? "selected" : ""}>0</option>
+              </select>
+            </div>
+            <div>
+              <label>secret</label>
+              <input id="nas-secret" value="${form.secret || ""}" placeholder="SEU_SECRET" />
+            </div>
+            <div>
+              <label>description</label>
+              <input id="nas-description" value="${form.description || ""}" placeholder="U-POP1-A" />
+            </div>
+          </div>
+
+          <p style="margin-top: 10px; color: #b7c1cf;">Campos server e community são enviados como NULL.</p>
+
+          <div class="row">
+            <button class="action primary" data-action="nas-save">Salvar NAS</button>
           </div>
         </div>
       </div>
@@ -1566,6 +1956,9 @@ class HaRadiusAccessPanel extends HTMLElement {
                 <option value="10" ${this._state.usersPageSize === 10 ? "selected" : ""}>10</option>
                 <option value="25" ${this._state.usersPageSize === 25 ? "selected" : ""}>25</option>
                 <option value="50" ${this._state.usersPageSize === 50 ? "selected" : ""}>50</option>
+                <option value="100" ${this._state.usersPageSize === 100 ? "selected" : ""}>100</option>
+                <option value="200" ${this._state.usersPageSize === 200 ? "selected" : ""}>200</option>
+                <option value="500" ${this._state.usersPageSize === 500 ? "selected" : ""}>500</option>
               </select>
             </div>
           </div>
@@ -1585,21 +1978,10 @@ class HaRadiusAccessPanel extends HTMLElement {
   }
 
   _renderUsersEdit() {
-    const replyAttributeOptions = [
-      "Framed-IP-Address",
-      "Framed-Pool",
-      "Framed-Route",
-      "Mikrotik-Rate-Limit",
-      "Mikrotik-Group",
-      "Session-Timeout",
-      "Idle-Timeout",
-      "Acct-Interim-Interval",
-      "MS-Primary-DNS-Server",
-      "MS-Secondary-DNS-Server",
-      "Tunnel-Type",
-      "Tunnel-Medium-Type",
-      "Tunnel-Private-Group-Id",
-    ];
+    const replyAttributeOptions = this._attributeOptions();
+    const replyHelpRows = this._uniqueAttributeList((this._state.userReplyAttributes || []).map((x) => x.attribute))
+      .map((attribute) => `<li><strong>${attribute}:</strong> ${this._attributeDescription(attribute)}</li>`)
+      .join("");
 
     const replyRows = (this._state.userReplyAttributes || [])
       .map(
@@ -1644,7 +2026,7 @@ class HaRadiusAccessPanel extends HTMLElement {
               <label>Atributo</label>
               <select id="users-reply-attribute">
                 <option value="">Selecione...</option>
-                ${replyAttributeOptions.map((attr) => `<option value="${attr}">${attr}</option>`).join("")}
+                ${replyAttributeOptions.map((attr) => `<option value="${attr}" title="${this._attributeDescription(attr)}">${attr}</option>`).join("")}
               </select>
             </div>
             <div class="op-operator">:=</div>
@@ -1654,8 +2036,18 @@ class HaRadiusAccessPanel extends HTMLElement {
             </div>
           </div>
           <div class="row">
+            <button class="action" data-action="users-reply-help">Ajuda do atributo (popup)</button>
             <button class="action primary" data-action="users-reply-add">${this._state.editingReplyIndex != null ? "Salvar Reply" : "Adicionar Reply"}</button>
           </div>
+
+          ${replyHelpRows ? `
+            <div class="row">
+              <div style="width: 100%; border: 1px solid #59657c; border-radius: 3px; background: #1c2639; padding: 8px 10px;">
+                <strong>Descrição dos atributos selecionados</strong>
+                <ul style="margin: 8px 0 0; padding-left: 20px;">${replyHelpRows}</ul>
+              </div>
+            </div>
+          ` : ""}
 
           <table>
             <thead><tr><th>Atributo</th><th>Op</th><th>Valor</th><th>Acoes</th></tr></thead>

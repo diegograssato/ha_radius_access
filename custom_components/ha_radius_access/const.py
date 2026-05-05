@@ -22,7 +22,7 @@ PANEL_FRONTEND_URL_PATH = "ha-radius-access"
 PANEL_WEBCOMPONENT_NAME = "ha-radius-access-panel"
 PANEL_TITLE = "HA Radius Access"
 PANEL_ICON = "mdi:account-network"
-PANEL_MODULE_URL = "/ha_radius_access_static/index.js?v=20260410b"
+PANEL_MODULE_URL = "/ha_radius_access_static/index.js?v=20260505c"
 
 ENTITY_TYPE_USER = "user"
 ENTITY_TYPE_MAC = "mac"
@@ -31,11 +31,6 @@ ENTITY_TYPES = {ENTITY_TYPE_USER, ENTITY_TYPE_MAC}
 TABLE_ENTITY_TYPE = "fr_entity_type"
 
 GROUP_ALLOWED_ATTRIBUTES = [
-   "Framed-IP-Address",
-    "Framed-Pool",
-    "Framed-Route",
-    "Mikrotik-Rate-Limit",
-    "Mikrotik-Group",
     "Session-Timeout",
     "Idle-Timeout",
     "Acct-Interim-Interval",
@@ -44,6 +39,40 @@ GROUP_ALLOWED_ATTRIBUTES = [
     "Tunnel-Type",
     "Tunnel-Medium-Type",
     "Tunnel-Private-Group-Id",
+    "Framed-Route",
+    "Framed-Pool",
+    "Framed-IP-Address",
+    "Filter-Id",
+    "Ascend-Data-Rate",
+    "Ascend-Xmit-Rate",
+    "MS-CHAP2-Success",
+    "MS-MPPE-Send-Key",
+    "MS-MPPE-Recv-Key",
+    "Ascend-Client-Gateway",
+    "MS-MPPE-Encryption-Policy",
+    "MS-MPPE-Encryption-Types",
+    "Mikrotik-Mark-Id",
+    "Mikrotik-Recv-Limit",
+    "Mikrotik-Recv-Limit-Gigawords",
+    "Mikrotik-Xmit-Limit",
+    "Mikrotik-Xmit-Limit-Gigawords",
+    "Mikrotik-Wireless-Forward",
+    "Mikrotik-Wireless-Skip-Dot1x",
+    "Mikrotik-Wireless-Enc-Algo",
+    "Mikrotik-Wireless-Enc-Key",
+    "Mikrotik-Wireless-VLANID",
+    "Mikrotik-Wireless-VLANID-type",
+    "Mikrotik-Switching-Filter",
+    "Mikrotik-Rate-Limit",
+    "Mikrotik-Group",
+    "Mikrotik-Advertise-URL",
+    "Mikrotik-Advertise-Interval",
+    "WISPr-Redirection-URL",
+    "WISPr-Bandwidth-Min-Up",
+    "WISPr-Bandwidth-Min-Down",
+    "WISPr-Bandwidth-Max-Up",
+    "WISPr-Bandwidth-Max-Down",
+    "WISPr-Session-Terminate-Time",
 ]
 
 ENABLE_ON = "Y"

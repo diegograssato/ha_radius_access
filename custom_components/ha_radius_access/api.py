@@ -67,6 +67,27 @@ def _sanitize_optional_text(value: Any, field: str, max_len: int = 255) -> str |
     return text
 
 
+def _sanitize_nas_type(value: Any) -> str:
+    """Validate NAS type."""
+    nas_type = _sanitize_text(value, "type", max_len=32).lower()
+    if nas_type not in {"other", "mikrotik"}:
+        raise vol.Invalid("type must be other or mikrotik")
+    return nas_type
+
+
+def _sanitize_nas_ports(value: Any) -> int | None:
+    """Validate NAS ports field (NULL or 0)."""
+    if value is None:
+        return None
+
+    text = str(value).strip()
+    if not text or text.upper() == "NULL":
+        return None
+    if text == "0":
+        return 0
+    raise vol.Invalid("ports must be NULL or 0")
+
+
 class FreeRadiusAPIBaseView(HomeAssistantView):
     """Common helpers for API views."""
 
@@ -398,6 +419,89 @@ class FreeRadiusUsersView(FreeRadiusAPIBaseView):
             return self._error(str(err), 500)
 
 
+class FreeRadiusNasView(FreeRadiusAPIBaseView):
+    """CRUD for nas table."""
+
+    url = f"{API_BASE}/nas"
+    name = "api:ha_radius_access:nas"
+
+    async def get(self, request):
+        """List NAS entries."""
+        try:
+            rows = await self.client.get_nas()
+            return self._ok(rows)
+        except FreeRadiusDBError as err:
+            return self._error(str(err), 500)
+
+    async def post(self, request):
+        """Create NAS entry."""
+        try:
+            payload = await request.json()
+            nasname = _sanitize_text(payload.get("nasname"), "nasname", 128)
+            shortname = _sanitize_text(payload.get("shortname"), "shortname", 128)
+            nas_type = _sanitize_nas_type(payload.get("type"))
+            ports = _sanitize_nas_ports(payload.get("ports"))
+            secret = _sanitize_text(payload.get("secret"), "secret", 255)
+            description = _sanitize_optional_text(payload.get("description"), "description", 255)
+
+            # server/community are intentionally fixed as NULL.
+            await self.client.create_nas(
+                nasname=nasname,
+                shortname=shortname,
+                nas_type=nas_type,
+                ports=ports,
+                secret=secret,
+                server=None,
+                community=None,
+                description=description,
+            )
+            return self._ok({"nasname": nasname}, 201)
+        except vol.Invalid as err:
+            return self._error(str(err), 422)
+        except FreeRadiusDBError as err:
+            return self._error(str(err), 500)
+
+    async def put(self, request):
+        """Update NAS entry by nasname."""
+        try:
+            payload = await request.json()
+            nasname = _sanitize_text(payload.get("nasname"), "nasname", 128)
+            shortname = _sanitize_text(payload.get("shortname"), "shortname", 128)
+            nas_type = _sanitize_nas_type(payload.get("type"))
+            ports = _sanitize_nas_ports(payload.get("ports"))
+            secret = _sanitize_text(payload.get("secret"), "secret", 255)
+            description = _sanitize_optional_text(payload.get("description"), "description", 255)
+
+            # server/community are intentionally fixed as NULL.
+            await self.client.update_nas(
+                nasname=nasname,
+                shortname=shortname,
+                nas_type=nas_type,
+                ports=ports,
+                secret=secret,
+                server=None,
+                community=None,
+                description=description,
+            )
+            return self._ok({"nasname": nasname})
+        except vol.Invalid as err:
+            return self._error(str(err), 422)
+        except FreeRadiusDBError as err:
+            return self._error(str(err), 500)
+
+    async def delete(self, request):
+        """Delete NAS entry by nasname."""
+        nasname = request.query.get("nasname", "")
+        try:
+            nasname = _sanitize_text(nasname, "nasname", 128)
+            await self.client.delete_nas(nasname)
+            return self._ok({"nasname": nasname})
+        except vol.Invalid as err:
+            return self._error(str(err), 422)
+        except FreeRadiusDBError as err:
+            return self._error(str(err), 500)
+
+
 class FreeRadiusToggleUserView(FreeRadiusAPIBaseView):
     """Enable/disable endpoints."""
 
@@ -565,6 +669,7 @@ def register_views(hass: HomeAssistant, client: FreeRadiusMySQLClient) -> None:
         FreeRadiusGroupChecksView(hass, client),
         FreeRadiusToggleGroupView(hass, client),
         FreeRadiusUsersView(hass, client),
+        FreeRadiusNasView(hass, client),
         FreeRadiusToggleUserView(hass, client),
         FreeRadiusUserDetailsView(hass, client),
         FreeRadiusUserReplyAttrsView(hass, client),
